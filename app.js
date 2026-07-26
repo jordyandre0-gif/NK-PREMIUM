@@ -122,48 +122,66 @@ function aplicarPermissoesNaUI(){
     if(view === 'config') permitido = isAdmin; // config/gestão de usuários é só do admin
     el.style.display = permitido ? '' : 'none';
   });
-  $('painelGestaoUsuarios').style.display = isAdmin ? 'block' : 'none';
+  const painel = $('painelGestaoUsuarios');
+  if(painel) painel.style.display = isAdmin ? 'block' : 'none';
   // se a view atual não é mais permitida, volta pro dashboard
   const ativo = document.querySelector('.nav-item.active');
   if(ativo && ativo.style.display === 'none'){
-    document.querySelector('.nav-item[data-view="dashboard"]').click();
+    const dash = document.querySelector('.nav-item[data-view="dashboard"]');
+    if(dash) dash.click();
   }
 }
 
 function verificarAcessoEIniciar(user){
-  const emailLogado = (user.email||'').trim().toLowerCase();
-  const emailDono = (OWNER_EMAIL||'').trim().toLowerCase();
-  if(emailLogado === emailDono){
-    isAdmin = true; permissoesModulos = {};
-    finalizarLogin(user);
-    return;
-  }
-  db.collection('users').doc(WORKSPACE_ID).collection('usuarios').doc(emailLogado).get().then(doc=>{
-    if(doc.exists && doc.data().ativo){
-      isAdmin = false;
-      permissoesModulos = doc.data().modulos || {};
+  try{
+    const emailLogado = (user.email||'').trim().toLowerCase();
+    const emailDono = (OWNER_EMAIL||'').trim().toLowerCase();
+    if(emailLogado === emailDono){
+      isAdmin = true; permissoesModulos = {};
       finalizarLogin(user);
-    } else {
-      openModal('modalAcessoNegado');
-      auth.signOut();
+      return;
     }
-  }).catch(e=>{
-    console.error(e);
-    openModal('modalAcessoNegado');
-    auth.signOut();
-  });
+    db.collection('users').doc(WORKSPACE_ID).collection('usuarios').doc(emailLogado).get().then(doc=>{
+      try{
+        if(doc.exists && doc.data().ativo){
+          isAdmin = false;
+          permissoesModulos = doc.data().modulos || {};
+          finalizarLogin(user);
+        } else {
+          openModal('modalAcessoNegado');
+          auth.signOut();
+        }
+      } catch(erroInterno){
+        $('loginErr').textContent = 'Erro ao entrar (verificação de acesso): ' + erroInterno.message;
+        console.error(erroInterno);
+      }
+    }).catch(e=>{
+      console.error(e);
+      $('loginErr').textContent = 'Erro ao verificar seu acesso: ' + e.message;
+    });
+  } catch(erroExterno){
+    $('loginErr').textContent = 'Erro ao entrar: ' + erroExterno.message;
+    console.error(erroExterno);
+  }
 }
 let listenersIniciados = false;
 function finalizarLogin(user){
-  currentUser = user; UID = user.uid;
-  $('loginScreen').style.display = 'none';
-  $('app').classList.add('show');
-  $('userEmailShow').textContent = user.email + (isAdmin ? ' (administrador)' : '');
-  aplicarPermissoesNaUI();
-  if(!listenersIniciados){
-    listenersIniciados = true;
-    startListeners();
-    if(isAdmin) startUsuariosListener();
+  try{
+    currentUser = user; UID = user.uid;
+    $('loginScreen').style.display = 'none';
+    $('app').classList.add('show');
+    $('userEmailShow').textContent = user.email + (isAdmin ? ' (administrador)' : '');
+    aplicarPermissoesNaUI();
+    if(!listenersIniciados){
+      listenersIniciados = true;
+      startListeners();
+      if(isAdmin) startUsuariosListener();
+    }
+  } catch(erro){
+    $('loginScreen').style.display = 'flex';
+    $('app').classList.remove('show');
+    $('loginErr').textContent = 'Erro ao abrir o painel: ' + erro.message + ' (manda print disso)';
+    console.error(erro);
   }
 }
 
