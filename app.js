@@ -623,14 +623,41 @@ function fallbackCopy(texto){
 }
 
 // -------------------- CLIENTES --------------------
+let editandoClienteId = null;
+function abrirModalNovoCliente(){
+  editandoClienteId = null;
+  ['cliNome','cliCpf','cliWhats','cliInsta','cliObs'].forEach(id=> $(id).value='');
+  document.querySelector('#modalCliente h3').textContent = 'Novo cliente';
+  $('btnSalvarCliente').textContent = 'Salvar cliente';
+  openModal('modalCliente');
+}
+function editarCliente(id){
+  const c = clientes.find(x=>x.id===id);
+  if(!c){ toast('Cliente não encontrado.'); return; }
+  editandoClienteId = id;
+  $('cliNome').value = c.nome; $('cliCpf').value = c.cpf||''; $('cliWhats').value = c.whatsapp||'';
+  $('cliInsta').value = c.instagram||''; $('cliObs').value = c.obs||'';
+  document.querySelector('#modalCliente h3').textContent = 'Editar cliente';
+  $('btnSalvarCliente').textContent = 'Salvar alterações';
+  openModal('modalCliente');
+}
 function salvarCliente(){
   const nome = $('cliNome').value.trim();
   if(!nome){ toast('Informe o nome do cliente.'); return; }
-  const c = {
+  const dados = {
     nome, cpf: $('cliCpf').value.trim(), whatsapp: $('cliWhats').value.trim(), instagram: $('cliInsta').value.trim(),
-    obs: $('cliObs').value.trim(), totalGasto:0, ultimaCompra: null, createdAt: new Date().toISOString()
+    obs: $('cliObs').value.trim()
   };
-  col('clientes').add(c).then((ref)=>{
+  if(editandoClienteId){
+    col('clientes').doc(editandoClienteId).update(dados).then(()=>{
+      closeModal('modalCliente');
+      toast('Cliente atualizado.');
+      editandoClienteId = null;
+    }).catch(firestoreErr);
+    return;
+  }
+  dados.totalGasto = 0; dados.ultimaCompra = null; dados.createdAt = new Date().toISOString();
+  col('clientes').add(dados).then((ref)=>{
     closeModal('modalCliente');
     ['cliNome','cliCpf','cliWhats','cliInsta','cliObs'].forEach(id=> $(id).value='');
     toast('Cliente salvo.');
@@ -640,7 +667,7 @@ function salvarCliente(){
     }
   }).catch(firestoreErr);
 }
-function abrirNovoClienteDoPDV(){ clienteVindoDoPDV = true; openModal('modalCliente'); }
+function abrirNovoClienteDoPDV(){ editandoClienteId = null; clienteVindoDoPDV = true; openModal('modalCliente'); }
 function excluirCliente(id){ if(confirm('Excluir cliente?')) col('clientes').doc(id).delete().catch(firestoreErr); }
 function cobrarCliente(id){
   const c = clientes.find(x=>x.id===id);
@@ -659,6 +686,7 @@ function renderClientes(){
       <td>${c.ultimaCompra ? fmtData(c.ultimaCompra) : '—'}</td><td class="mono">${fmtMoney(c.totalGasto||0)}</td>
       <td style="white-space:nowrap;">
         ${c.whatsapp ? `<button class="mini-btn btn-wa" data-action="cobrar-cliente" data-id="${c.id}">💬</button>` : ''}
+        <button class="mini-btn" data-action="editar-cliente" data-id="${c.id}">Editar</button>
         <button class="mini-btn" data-action="excluir-cliente" data-id="${c.id}">✕</button>
       </td>`;
     tbl.appendChild(tr);
@@ -998,6 +1026,15 @@ function processarLoteFin(){
 function marcarRecebido(id){
   col('financeiro').doc(id).update({recebido: true}).then(()=> toast('Marcado como recebido.')).catch(firestoreErr);
 }
+function cancelarLancamento(id){
+  if(!confirm('Cancelar este lançamento? Não pode ser desfeito.')) return;
+  col('financeiro').doc(id).update({cancelado:true, recebido:false}).then(()=>{
+    // se houver uma tarefa de cobrança vinculada a esse lançamento (parcela de crediário), remove ela também
+    const tarefaVinculada = itens.find(i=> i.lancamentoId === id);
+    if(tarefaVinculada) col('itens').doc(tarefaVinculada.id).delete().catch(()=>{});
+    toast('Lançamento cancelado.');
+  }).catch(firestoreErr);
+}
 function setFiltroFinanceiro(f){
   filtroFinanceiro = (filtroFinanceiro === f) ? 'todos' : f;
   ['cardEntrada','cardAReceber','cardSaidas','cardLucro'].forEach(id=> $(id).classList.remove('filter-active'));
@@ -1060,9 +1097,10 @@ function renderFinanceiro(){
     let statusTag = '—';
     if(l.tipo==='entrada'){ statusTag = l.recebido===false ? '<span class="tag imp">Pendente</span>' : '<span class="tag deleg">Recebido</span>'; }
     const acao = (l.tipo==='entrada' && l.recebido===false) ? `<button class="mini-btn" data-action="marcar-recebido" data-id="${l.id}">Marcar recebido</button>` : '';
+    const acaoCancelar = `<button class="mini-btn btn-danger-ghost" data-action="cancelar-lancamento" data-id="${l.id}">Cancelar</button>`;
     tr.innerHTML = `<td>${fmtData(l.data)}</td><td>${escapeHtml(l.descricao)}</td><td>${escapeHtml(l.categoria||'—')}</td>
       <td>${l.tipo==='entrada' ? '<span class="tag deleg">Entrada</span>' : '<span class="tag urg">Saída</span>'}</td>
-      <td>${statusTag} ${acao}</td>
+      <td>${statusTag} ${acao} ${acaoCancelar}</td>
       <td class="mono">${fmtMoney(l.valor)}</td>`;
     tbl.appendChild(tr);
   });
@@ -1097,7 +1135,7 @@ function bindStaticEvents(){
   $('btnSalvarProduto').addEventListener('click', salvarProduto);
   $('btnFiltroAtivos').addEventListener('click', ()=> setFiltroEstoque('ativos'));
   $('btnFiltroInativos').addEventListener('click', ()=> setFiltroEstoque('inativos'));
-  $('btnNovoCliente').addEventListener('click', ()=> openModal('modalCliente'));
+  $('btnNovoCliente').addEventListener('click', abrirModalNovoCliente);
   $('btnNovoClientePDV').addEventListener('click', abrirNovoClienteDoPDV);
   $('pdvDesconto').addEventListener('input', ()=>{
     const v = Number($('pdvDesconto').value)||0;
@@ -1172,8 +1210,10 @@ function bindStaticEvents(){
       'editar-produto': ()=> editarProduto(id),
       'reativar-produto': ()=> reativarProduto(id),
       'excluir-cliente': ()=> excluirCliente(id),
+      'editar-cliente': ()=> editarCliente(id),
       'cobrar-cliente': ()=> cobrarCliente(id),
       'marcar-recebido': ()=> marcarRecebido(id),
+      'cancelar-lancamento': ()=> cancelarLancamento(id),
       'remover-carrinho': ()=> removerDoCarrinho(el.dataset.index),
       'agenda-dia': ()=> mostrarAgendaDia(el.dataset.date),
       'editar-venda': ()=> editarVenda(id),
