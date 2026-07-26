@@ -270,6 +270,9 @@ td{padding:10px; border-bottom:1px solid var(--border);}
         <div class="stat"><div class="label">Saídas (mês)</div><div class="value mono" id="finSaidas">R$ 0</div></div>
         <div class="stat"><div class="label">Saldo (mês)</div><div class="value mono" id="finSaldo">R$ 0</div></div>
         <div class="stat"><div class="label">A receber (crediário)</div><div class="value mono" id="finAReceber">R$ 0</div></div>
+        <div class="stat"><div class="label">📈 Lucro (mês)</div><div class="value mono" id="finLucro">R$ 0</div></div>
+        <div class="stat"><div class="label">📦 Estoque a custo</div><div class="value mono" id="finEstoqueCusto">R$ 0</div></div>
+        <div class="stat"><div class="label">📦 Estoque a venda</div><div class="value mono" id="finEstoqueVenda">R$ 0</div></div>
       </div>
       <div class="topbar" style="margin:18px 0 12px; flex-wrap:wrap; gap:8px;">
         <div></div>
@@ -375,7 +378,12 @@ td{padding:10px; border-bottom:1px solid var(--border);}
   <div class="modal">
     <span class="close-x" data-close="modalListaLote">✕</span>
     <h3>Cadastrar produtos por lista</h3>
-    <div class="hint">Uma linha por produto, separando os campos com ponto e vírgula:<br><b>Nome; Preço; Estoque; Categoria; Custo; Estoque mínimo</b><br>Só Nome, Preço e Estoque são obrigatórios.</div>
+    <div class="hint">Aceita dois formatos — pode colar o que já tiver à mão:<br>
+    <b>1) Formato com bullets</b> (do jeito que você já escreve):<br>
+    • Nome do produto – 12 unidades<br>
+    💰 Custo: R$ 28,50 | Venda: R$ 60,00<br><br>
+    <b>2) Formato simples por linha:</b> Nome; Preço; Estoque; Categoria; Custo; Estoque mínimo<br>
+    Em ambos, ao ter custo preenchido, o valor já é lançado sozinho no Financeiro como saída (compra do estoque).</div>
     <span class="field-label">Cole sua lista aqui</span>
     <textarea id="loteTexto" rows="7" placeholder="Nome; Preço; Estoque"></textarea>
     <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnProcessarLote">Cadastrar tudo</button>
