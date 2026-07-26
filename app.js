@@ -292,6 +292,8 @@ function renderDashboard(){
   if(atrasadas.length) resumo.push(`${atrasadas.length} tarefa(s) atrasada(s) — vale reorganizar antes de assumir compromissos novos.`);
   const pendentes = lancamentos.filter(l=> l.tipo==='entrada' && l.recebido===false);
   if(pendentes.length) resumo.push(`${pendentes.length} parcela(s) de crediário ainda a receber.`);
+  const lucroHoje = vendasHojeArr.reduce((s,v)=> s+Number(v.lucroTotal||0), 0);
+  if(vendasHojeArr.length) resumo.push(`Lucro estimado hoje: ${fmtMoney(lucroHoje)}.`);
   if(totalHoje === 0) resumo.push('Ainda não há vendas registradas hoje.');
   else resumo.push(`Faturamento de hoje: ${fmtMoney(totalHoje)} em ${vendasHojeArr.length} venda(s).`);
   $('resumoExecutivo').innerHTML = resumo.map(r=>'• '+r).join('<br>');
@@ -320,6 +322,14 @@ function renderRanking(){
 }
 
 // -------------------- ESTOQUE --------------------
+function registrarCompraEstoque(nome, custo, estoque){
+  const valor = Math.round(custo * estoque * 100) / 100;
+  if(valor <= 0) return;
+  col('financeiro').add({
+    descricao: `Compra de estoque: ${nome} (${estoque}un)`,
+    tipo:'saida', valor, data: todayStr(), recebido:true, createdAt: new Date().toISOString()
+  }).catch(firestoreErr);
+}
 function salvarProduto(){
   const nome = $('prodNome').value.trim();
   if(!nome){ toast('Informe o nome do produto.'); return; }
@@ -331,8 +341,9 @@ function salvarProduto(){
   };
   col('produtos').add(p).then(()=>{
     closeModal('modalProduto');
+    registrarCompraEstoque(p.nome, p.custo, p.estoque);
     ['prodNome','prodCusto','prodPreco'].forEach(id=> $(id).value='');
-    toast('Produto salvo.');
+    toast('Produto salvo' + (p.custo && p.estoque ? ' e custo lançado no Financeiro.' : '.'));
   }).catch(firestoreErr);
 }
 function renderEstoque(){
@@ -365,21 +376,50 @@ function parseLoteLinha(linha){
     minimo: parseInt(parts[5]||'2', 10) || 2
   };
 }
+function parseNumeroBR(str){
+  return parseFloat(String(str||'').trim().replace(/\./g,'').replace(',', '.'));
+}
+function parseListaBullets(texto){
+  const validos = [];
+  const regex = /•\s*(.+?)\s+[–-]\s+(\d+)\s*unidades?\s*(\([^)]*\))?[\s\S]*?Custo:\s*R\$\s*([\d.,]+)\s*\|\s*Venda:\s*R\$\s*([\d.,]+)/gi;
+  let m;
+  while((m = regex.exec(texto)) !== null){
+    let nome = m[1].trim();
+    if(m[3]) nome += ' ' + m[3].trim();
+    const estoque = parseInt(m[2], 10);
+    const custo = parseNumeroBR(m[4]);
+    const preco = parseNumeroBR(m[5]);
+    if(!nome || isNaN(estoque) || isNaN(custo) || isNaN(preco)) continue;
+    const categoria = /bon[eé]/i.test(nome) ? 'Boné' : 'Roupas';
+    validos.push({nome, preco, estoque, categoria, custo, minimo:2});
+  }
+  return validos;
+}
 function processarLote(){
-  const linhas = $('loteTexto').value.split('\n').map(l=>l.trim()).filter(Boolean);
-  if(!linhas.length){ toast('Cole ao menos uma linha.'); return; }
-  const validos = [], invalidos = [];
-  linhas.forEach(l=>{
-    const r = parseLoteLinha(l);
-    if(!r) return;
-    if(r.erro) invalidos.push(r.nome); else validos.push(r);
-  });
+  const texto = $('loteTexto').value;
+  if(!texto.trim()){ toast('Cole a lista de produtos.'); return; }
+  let validos = [], invalidos = [];
+
+  if(texto.includes('•') && /custo/i.test(texto)){
+    validos = parseListaBullets(texto);
+    if(!validos.length){ toast('Não reconheci nenhum item nesse texto. Confira o formato (veja o exemplo acima).'); return; }
+  } else {
+    const linhas = texto.split('\n').map(l=>l.trim()).filter(Boolean);
+    linhas.forEach(l=>{
+      const r = parseLoteLinha(l);
+      if(!r) return;
+      if(r.erro) invalidos.push(r.nome); else validos.push(r);
+    });
+  }
+
   const promises = validos.map(p=> col('produtos').add({
     nome:p.nome, categoria:p.categoria, custo:p.custo, preco:p.preco,
     estoque:p.estoque, minimo:p.minimo, createdAt: new Date().toISOString()
-  }));
+  }).then(()=>{ registrarCompraEstoque(p.nome, p.custo, p.estoque); }));
   Promise.all(promises).then(()=>{
+    const totalInvestido = validos.reduce((s,p)=> s + (p.custo>0 ? p.custo*p.estoque : 0), 0);
     let resultado = `✅ ${validos.length} produto(s) cadastrado(s) com sucesso.`;
+    if(totalInvestido > 0) resultado += `\n💰 ${fmtMoney(totalInvestido)} lançados automaticamente no Financeiro (saída, custo do estoque).`;
     if(invalidos.length) resultado += `\n⚠️ ${invalidos.length} linha(s) ignorada(s) (formato incorreto): ${invalidos.join(', ')}`;
     const box = $('loteResultado'); box.style.display='block'; box.textContent = resultado;
     $('loteTexto').value = '';
@@ -498,7 +538,7 @@ function adicionarAoCarrinho(){
   const qtd = Number($('pdvQtd').value)||1;
   const existente = carrinho.find(c=>c.produtoId===prodId);
   if(existente){ existente.quantidade += qtd; }
-  else { carrinho.push({produtoId: prod.id, produtoNome: prod.nome, precoUnit: prod.preco, quantidade: qtd}); }
+  else { carrinho.push({produtoId: prod.id, produtoNome: prod.nome, precoUnit: prod.preco, custoUnit: Number(prod.custo)||0, quantidade: qtd}); }
   $('pdvQtd').value = 1;
   renderCarrinho();
 }
@@ -549,9 +589,14 @@ function registrarVenda(){
 
   if(pagamento === 'Crediário' && !cli){ toast('Selecione um cliente cadastrado para venda parcelada (avulso não pode).'); return; }
 
-  const itensVenda = carrinho.map(c=> ({produtoId:c.produtoId, produtoNome:c.produtoNome, quantidade:c.quantidade, precoUnit:c.precoUnit, subtotal:c.precoUnit*c.quantidade}));
+  const itensVenda = carrinho.map(c=> ({
+    produtoId:c.produtoId, produtoNome:c.produtoNome, quantidade:c.quantidade, precoUnit:c.precoUnit,
+    custoUnit:c.custoUnit||0, subtotal:c.precoUnit*c.quantidade,
+    lucro: c.custoUnit>0 ? (c.precoUnit-c.custoUnit)*c.quantidade : 0
+  }));
+  const lucroTotal = itensVenda.reduce((s,i)=> s+i.lucro, 0);
   const venda = {
-    itens: itensVenda, total, clienteId: cliId || null, clienteNome: cli ? cli.nome : 'Cliente avulso',
+    itens: itensVenda, total, lucroTotal, clienteId: cliId || null, clienteNome: cli ? cli.nome : 'Cliente avulso',
     avulso, pagamento, createdAt: new Date().toISOString()
   };
 
@@ -626,7 +671,7 @@ function renderVendas(){
     const div = document.createElement('div');
     div.className = 'list-item';
     div.innerHTML = `<div class="title">${escapeHtml(itensTxt)} ${v.avulso?'<span class="tag wait">AVULSO</span>':(v.clienteNome?'— '+escapeHtml(v.clienteNome):'')} ${v.pagamento==='Crediário'?'<span class="tag imp">CREDIÁRIO</span>':''}</div>
-      <span class="mono">${fmtMoney(v.total)}</span>`;
+      <span class="mono">${fmtMoney(v.total)}${v.lucroTotal ? ' <span style="color:var(--ok); font-size:11px;">(lucro '+fmtMoney(v.lucroTotal)+')</span>' : ''}</span>`;
     el.appendChild(div);
   });
 }
@@ -688,6 +733,13 @@ function renderFinanceiro(){
   $('finSaidas').textContent = fmtMoney(saidas);
   $('finSaldo').textContent = fmtMoney(entradas - saidas);
   $('finAReceber').textContent = fmtMoney(aReceber);
+
+  const lucroMes = vendas.filter(v=> (v.createdAt||'').slice(0,7)===mesAtual).reduce((s,v)=> s+Number(v.lucroTotal||0), 0);
+  $('finLucro').textContent = fmtMoney(lucroMes);
+  const estoqueCusto = produtos.reduce((s,p)=> s + Number(p.custo||0)*Number(p.estoque||0), 0);
+  const estoqueVenda = produtos.reduce((s,p)=> s + Number(p.preco||0)*Number(p.estoque||0), 0);
+  $('finEstoqueCusto').textContent = fmtMoney(estoqueCusto);
+  $('finEstoqueVenda').textContent = fmtMoney(estoqueVenda);
 
   const tbl = $('tblFinanceiro');
   tbl.innerHTML = '';
