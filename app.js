@@ -90,6 +90,18 @@ function doSignup(){
   auth.createUserWithEmailAndPassword(email, pass).catch(e => $('loginErr').textContent = traduzErro(e));
 }
 function doLogout(){ auth.signOut(); }
+function doResetPassword(){
+  const email = $('loginEmail').value.trim();
+  $('loginErr').textContent = '';
+  if(!email){ $('loginErr').textContent = 'Digite seu e-mail no campo acima primeiro.'; return; }
+  auth.sendPasswordResetEmail(email).then(()=>{
+    $('loginErr').style.color = 'var(--ok)';
+    $('loginErr').textContent = 'Link enviado! Confira seu e-mail (' + email + ') e defina a nova senha.';
+  }).catch(e=>{
+    $('loginErr').style.color = '';
+    $('loginErr').textContent = traduzErro(e);
+  });
+}
 function traduzErro(e){
   const map = {
     'auth/invalid-email':'E-mail inválido.', 'auth/user-not-found':'Usuário não encontrado.',
@@ -1076,6 +1088,7 @@ function bindStaticEvents(){
   $('btnLogin').addEventListener('click', doLogin);
   $('btnLoginGoogle').addEventListener('click', doLoginGoogle);
   $('btnSignup').addEventListener('click', doSignup);
+  $('btnEsqueciSenha').addEventListener('click', doResetPassword);
   $('btnFecharAcessoNegado').addEventListener('click', ()=> closeModal('modalAcessoNegado'));
   $('btnLogout').addEventListener('click', doLogout);
   $('btnTheme').addEventListener('click', toggleTheme);
