@@ -10,3 +10,9 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+
+// ============================================================
+// PAINEL PRIVADO — onde seus dados ficam guardados
+// ============================================================
+// Este é o mesmo UID de sempre — não precisa procurar de novo no Firebase.
+const WORKSPACE_ID = "eW3zEtUNidPNImp0yF2rTbhQFXd2";
