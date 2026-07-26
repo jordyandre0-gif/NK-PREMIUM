@@ -381,7 +381,7 @@ function parseNumeroBR(str){
 }
 function parseListaBullets(texto){
   const validos = [];
-  const regex = /•\s*(.+?)\s+[–-]\s+(\d+)\s*unidades?\s*(\([^)]*\))?[\s\S]*?Custo:\s*R\$\s*([\d.,]+)\s*\|\s*Venda:\s*R\$\s*([\d.,]+)/gi;
+  const regex = /^[\s•·\-*]*(.+?)\s+[–—-]\s+(\d+)\s*unidades?\s*(\([^)]*\))?[\s\S]*?Custo:\s*R\$\s*([\d.,]+)\s*\|\s*Venda:\s*R\$\s*([\d.,]+)/gim;
   let m;
   while((m = regex.exec(texto)) !== null){
     let nome = m[1].trim();
@@ -400,10 +400,8 @@ function processarLote(){
   if(!texto.trim()){ toast('Cole a lista de produtos.'); return; }
   let validos = [], invalidos = [];
 
-  if(texto.includes('•') && /custo/i.test(texto)){
-    validos = parseListaBullets(texto);
-    if(!validos.length){ toast('Não reconheci nenhum item nesse texto. Confira o formato (veja o exemplo acima).'); return; }
-  } else {
+  validos = parseListaBullets(texto);
+  if(!validos.length){
     const linhas = texto.split('\n').map(l=>l.trim()).filter(Boolean);
     linhas.forEach(l=>{
       const r = parseLoteLinha(l);
@@ -411,6 +409,7 @@ function processarLote(){
       if(r.erro) invalidos.push(r.nome); else validos.push(r);
     });
   }
+  if(!validos.length){ toast('Não consegui reconhecer nenhum item nesse texto. Confira o formato.'); return; }
 
   const promises = validos.map(p=> col('produtos').add({
     nome:p.nome, categoria:p.categoria, custo:p.custo, preco:p.preco,
