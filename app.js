@@ -1,5 +1,5 @@
 // ============================================================
-// NK PREMIUM — LÓGICA DO APP (v3)
+// NK PREMIUM — LÓGICA DO APP (v4)
 // ============================================================
 
 let currentUser = null;
@@ -10,6 +10,10 @@ let carrinho = [];
 let agendaMonthOffset = 0;
 let crediarioDataEditadaManualmente = false;
 let ultimoRecibo = null;
+let filtroEstoque = 'ativos'; // 'ativos' | 'inativos'
+let filtroFinanceiro = 'todos'; // 'todos' | 'entrada' | 'areceber' | 'saida'
+let editandoVendaId = null;
+let vendaEmCancelamento = null;
 
 // -------------------- HELPERS --------------------
 function $(id){ return document.getElementById(id); }
@@ -35,6 +39,8 @@ function toast(msg){
 }
 function col(name){ return db.collection('users').doc(UID).collection(name); }
 function firestoreErr(e){ console.error(e); toast('Erro ao salvar: ' + (e && e.message ? e.message : e)); }
+function produtosAtivos(){ return produtos.filter(p=> p.ativo !== false); }
+function ordenarPorNome(arr){ return [...arr].sort((a,b)=> (a.nome||'').localeCompare(b.nome||'', 'pt-BR')); }
 
 // -------------------- THEME --------------------
 function toggleTheme(){
@@ -100,18 +106,18 @@ function openCapture(){
 function startListeners(){
   col('produtos').onSnapshot(snap=>{
     produtos = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderEstoque(); fillPdvSelects(); renderDashboard();
+    renderEstoque(); fillPdvDatalist(); fillProdutosExistentesList(); renderDashboard();
   }, err => console.error('produtos', err));
   col('clientes').onSnapshot(snap=>{
     clientes = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderClientes(); fillPdvSelects();
+    renderClientes(); fillPdvClienteSelect();
   }, err => console.error('clientes', err));
   col('vendas').onSnapshot(snap=>{
     vendas = snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=> (b.createdAt||'').localeCompare(a.createdAt||''));
     renderVendas(); renderDashboard();
   }, err => console.error('vendas', err));
   col('financeiro').onSnapshot(snap=>{
-    lancamentos = snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=> (b.data||'').localeCompare(a.data||''));
+    lancamentos = snap.docs.map(d=>({id:d.id, ...d.data()}));
     renderFinanceiro();
   }, err => console.error('financeiro', err));
   col('itens').onSnapshot(snap=>{
@@ -206,7 +212,7 @@ function renderTaskGroup(elId, list, emptyMsg, mostrarCobrar){
   });
 }
 
-// -------------------- AGENDA (calendário) --------------------
+// -------------------- AGENDA --------------------
 const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 function renderAgenda(){
   if(!$('agendaGrid')) return;
@@ -250,6 +256,12 @@ function mostrarAgendaDia(dateStr){
 }
 
 // -------------------- RENDER: DASHBOARD --------------------
+function vendasValidas(){ return vendas.filter(v=> v.status !== 'cancelada'); }
+function itensDaVenda(v){
+  if(v.itens && v.itens.length) return v.itens;
+  if(v.produtoNome) return [{produtoNome:v.produtoNome, quantidade:v.quantidade}];
+  return [];
+}
 function renderDashboard(){
   const hoje = todayStr();
   const tarefasAbertas = itens.filter(i=> i.tipo==='tarefa' && !i.concluido);
@@ -258,10 +270,10 @@ function renderDashboard(){
   $('statAtrasadas').textContent = atrasadas.length;
   $('statHoje').textContent = doDia.length;
 
-  const estoqueBaixo = produtos.filter(p=> Number(p.estoque) <= Number(p.minimo||0));
+  const estoqueBaixo = produtosAtivos().filter(p=> Number(p.estoque) <= Number(p.minimo||0));
   $('statEstoqueBaixo').textContent = estoqueBaixo.length;
 
-  const vendasHojeArr = vendas.filter(v=> (v.createdAt||'').slice(0,10) === hoje);
+  const vendasHojeArr = vendasValidas().filter(v=> (v.createdAt||'').slice(0,10) === hoje);
   const totalHoje = vendasHojeArr.reduce((s,v)=> s + Number(v.total||0), 0);
   $('statFaturado').textContent = fmtMoney(totalHoje);
 
@@ -290,7 +302,7 @@ function renderDashboard(){
   let resumo = [];
   if(estoqueBaixo.length) resumo.push(`${estoqueBaixo.length} produto(s) com estoque baixo — considere repor.`);
   if(atrasadas.length) resumo.push(`${atrasadas.length} tarefa(s) atrasada(s) — vale reorganizar antes de assumir compromissos novos.`);
-  const pendentes = lancamentos.filter(l=> l.tipo==='entrada' && l.recebido===false);
+  const pendentes = lancamentos.filter(l=> l.tipo==='entrada' && l.recebido===false && !l.cancelado);
   if(pendentes.length) resumo.push(`${pendentes.length} parcela(s) de crediário ainda a receber.`);
   const lucroHoje = vendasHojeArr.reduce((s,v)=> s+Number(v.lucroTotal||0), 0);
   if(vendasHojeArr.length) resumo.push(`Lucro estimado hoje: ${fmtMoney(lucroHoje)}.`);
@@ -298,16 +310,10 @@ function renderDashboard(){
   else resumo.push(`Faturamento de hoje: ${fmtMoney(totalHoje)} em ${vendasHojeArr.length} venda(s).`);
   $('resumoExecutivo').innerHTML = resumo.map(r=>'• '+r).join('<br>');
 }
-
-function itensDaVenda(v){
-  if(v.itens && v.itens.length) return v.itens;
-  if(v.produtoNome) return [{produtoNome:v.produtoNome, quantidade:v.quantidade}];
-  return [];
-}
 function renderRanking(){
   const mesAtual = todayStr().slice(0,7);
   const contagem = {};
-  vendas.filter(v=> (v.createdAt||'').slice(0,7)===mesAtual).forEach(v=>{
+  vendasValidas().filter(v=> (v.createdAt||'').slice(0,7)===mesAtual).forEach(v=>{
     itensDaVenda(v).forEach(i=>{ contagem[i.produtoNome] = (contagem[i.produtoNome]||0) + Number(i.quantidade||0); });
   });
   const arr = Object.entries(contagem).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -326,7 +332,7 @@ function registrarCompraEstoque(nome, custo, estoque){
   const valor = Math.round(custo * estoque * 100) / 100;
   if(valor <= 0) return;
   col('financeiro').add({
-    descricao: `Compra de estoque: ${nome} (${estoque}un)`,
+    descricao: `Compra de estoque: ${nome} (${estoque}un)`, categoria: 'Compra de estoque',
     tipo:'saida', valor, data: todayStr(), recebido:true, createdAt: new Date().toISOString()
   }).catch(firestoreErr);
 }
@@ -337,6 +343,7 @@ function salvarProduto(){
     nome, categoria: $('prodCategoria').value,
     custo: Number($('prodCusto').value)||0, preco: Number($('prodPreco').value)||0,
     estoque: Number($('prodEstoque').value)||0, minimo: Number($('prodMinimo').value)||0,
+    ativo: (Number($('prodEstoque').value)||0) > 0,
     createdAt: new Date().toISOString()
   };
   col('produtos').add(p).then(()=>{
@@ -346,23 +353,38 @@ function salvarProduto(){
     toast('Produto salvo' + (p.custo && p.estoque ? ' e custo lançado no Financeiro.' : '.'));
   }).catch(firestoreErr);
 }
+function setFiltroEstoque(f){
+  filtroEstoque = f;
+  $('btnFiltroAtivos').classList.toggle('active-filter', f==='ativos');
+  $('btnFiltroInativos').classList.toggle('active-filter', f==='inativos');
+  renderEstoque();
+}
 function renderEstoque(){
   const tbl = $('tblEstoque');
   tbl.innerHTML = '';
-  $('estoqueEmpty').style.display = produtos.length ? 'none' : 'block';
-  produtos.forEach(p=>{
+  const filtrados = ordenarPorNome(produtos.filter(p=> filtroEstoque==='ativos' ? p.ativo!==false : p.ativo===false));
+  $('estoqueEmpty').style.display = filtrados.length ? 'none' : 'block';
+  $('estoqueEmpty').textContent = filtroEstoque==='ativos' ? 'Nenhum produto ativo cadastrado.' : 'Nenhum produto inativo (sem estoque zerado).';
+  filtrados.forEach(p=>{
     const baixo = Number(p.estoque) <= Number(p.minimo||0);
     const tr = document.createElement('tr');
+    const botaoExtra = p.ativo===false ? `<button class="mini-btn" data-action="reativar-produto" data-id="${p.id}">Reativar</button>` : '';
     tr.innerHTML = `<td>${escapeHtml(p.nome)}</td><td>${escapeHtml(p.categoria||'')}</td>
       <td class="mono">${fmtMoney(p.preco)}</td>
-      <td class="mono">${p.estoque} ${baixo?'<span class="tag urg">BAIXO</span>':''}</td>
-      <td><button class="mini-btn" data-action="excluir-produto" data-id="${p.id}">Excluir</button></td>`;
+      <td class="mono">${p.estoque} ${baixo?'<span class="tag urg">BAIXO</span>':''} ${p.ativo===false?'<span class="tag wait">INATIVO</span>':''}</td>
+      <td style="white-space:nowrap;">${botaoExtra} <button class="mini-btn" data-action="excluir-produto" data-id="${p.id}">Excluir</button></td>`;
     tbl.appendChild(tr);
   });
 }
 function excluirProduto(id){ if(confirm('Excluir produto?')) col('produtos').doc(id).delete().catch(firestoreErr); }
+function reativarProduto(id){ col('produtos').doc(id).update({ativo:true}).then(()=> toast('Produto reativado.')).catch(firestoreErr); }
+function fillProdutosExistentesList(){
+  const dl = $('produtosExistentesList');
+  dl.innerHTML = ordenarPorNome(produtos).map(p=> `<option value="${escapeHtml(p.nome)}">${p.ativo===false?' (inativo)':''}</option>`).join('');
+}
 
 // -------------------- ESTOQUE EM LOTE --------------------
+function parseNumeroBR(str){ return parseFloat(String(str||'').trim().replace(/\./g,'').replace(',', '.')); }
 function parseLoteLinha(linha){
   const parts = linha.split(';').map(s=>s.trim());
   if(!parts[0]) return null;
@@ -375,9 +397,6 @@ function parseLoteLinha(linha){
     custo: parseFloat((parts[4]||'0').replace(',', '.')) || 0,
     minimo: parseInt(parts[5]||'2', 10) || 2
   };
-}
-function parseNumeroBR(str){
-  return parseFloat(String(str||'').trim().replace(/\./g,'').replace(',', '.'));
 }
 function parseListaBullets(texto){
   const validos = [];
@@ -413,7 +432,7 @@ function processarLote(){
 
   const promises = validos.map(p=> col('produtos').add({
     nome:p.nome, categoria:p.categoria, custo:p.custo, preco:p.preco,
-    estoque:p.estoque, minimo:p.minimo, createdAt: new Date().toISOString()
+    estoque:p.estoque, minimo:p.minimo, ativo: p.estoque>0, createdAt: new Date().toISOString()
   }).then(()=>{ registrarCompraEstoque(p.nome, p.custo, p.estoque); }));
   Promise.all(promises).then(()=>{
     const totalInvestido = validos.reduce((s,p)=> s + (p.custo>0 ? p.custo*p.estoque : 0), 0);
@@ -438,8 +457,8 @@ function processarBaixa(){
     const prod = produtos.find(p=> p.nome.toLowerCase() === nome.toLowerCase());
     if(!prod){ logs.push(`❌ Não encontrado: "${nome}"`); return; }
     const novoEstoque = Math.max(0, Number(prod.estoque) - qtd);
-    promises.push(col('produtos').doc(prod.id).update({estoque: novoEstoque}));
-    logs.push(`✅ ${prod.nome}: ${prod.estoque} → ${novoEstoque}`);
+    promises.push(col('produtos').doc(prod.id).update({estoque: novoEstoque, ativo: novoEstoque>0}));
+    logs.push(`✅ ${prod.nome}: ${prod.estoque} → ${novoEstoque}${novoEstoque<=0?' (inativado)':''}`);
   });
   Promise.all(promises).then(()=>{
     const box = $('baixaResultado'); box.style.display='block'; box.textContent = logs.join('\n');
@@ -450,7 +469,7 @@ function processarBaixa(){
 
 // -------------------- CATÁLOGO --------------------
 function gerarCatalogo(){
-  const disponiveis = produtos.filter(p=> Number(p.estoque) > 0);
+  const disponiveis = ordenarPorNome(produtosAtivos().filter(p=> Number(p.estoque) > 0));
   if(!disponiveis.length){ toast('Nenhum produto com estoque disponível.'); return; }
   const porCategoria = {};
   disponiveis.forEach(p=>{
@@ -459,7 +478,7 @@ function gerarCatalogo(){
     porCategoria[cat].push(p);
   });
   let texto = '🖤 NK PREMIUM — CATÁLOGO\n\n';
-  Object.keys(porCategoria).forEach(cat=>{
+  Object.keys(porCategoria).sort().forEach(cat=>{
     texto += `📦 ${cat.toUpperCase()}\n`;
     porCategoria[cat].forEach(p=>{ texto += `• ${p.nome} — ${fmtMoney(p.preco)}\n`; });
     texto += '\n';
@@ -507,7 +526,7 @@ function renderClientes(){
   const tbl = $('tblClientes');
   tbl.innerHTML = '';
   $('clientesEmpty').style.display = clientes.length ? 'none' : 'block';
-  clientes.forEach(c=>{
+  ordenarPorNome(clientes).forEach(c=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${escapeHtml(c.nome)}</td><td>${escapeHtml(c.cpf||'—')}</td><td>${escapeHtml(c.whatsapp||'—')}</td>
       <td>${c.ultimaCompra || '—'}</td><td class="mono">${fmtMoney(c.totalGasto||0)}</td>
@@ -519,26 +538,36 @@ function renderClientes(){
   });
 }
 
-// -------------------- PDV (CARRINHO) --------------------
-function fillPdvSelects(){
-  const selP = $('pdvProduto');
-  const atualP = selP.value;
-  selP.innerHTML = produtos.map(p=> `<option value="${p.id}">${escapeHtml(p.nome)} — ${fmtMoney(p.preco)} (estoque: ${p.estoque})</option>`).join('') || '<option value="">— Cadastre um produto —</option>';
-  if(atualP) selP.value = atualP;
+// -------------------- PDV --------------------
+function fillPdvDatalist(){
+  const dl = $('produtosDatalist');
+  dl.innerHTML = ordenarPorNome(produtosAtivos()).map(p=> `<option value="${escapeHtml(p.nome)}">`).join('');
+}
+function fillPdvClienteSelect(){
   const selC = $('pdvCliente');
-  const atualC = selC.value;
-  selC.innerHTML = '<option value="">Cliente avulso</option>' + clientes.map(c=> `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
-  selC.value = atualC;
+  const atual = selC.value;
+  selC.innerHTML = '<option value="">Cliente avulso</option>' + ordenarPorNome(clientes).map(c=> `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
+  selC.value = atual;
+}
+function buscarProdutoPorNomeExato(nome){
+  const alvo = (nome||'').trim().toLowerCase();
+  return produtosAtivos().find(p=> p.nome.toLowerCase() === alvo);
+}
+document.addEventListener('DOMContentLoaded', ()=>{});
+function atualizarInfoProduto(){
+  const prod = buscarProdutoPorNomeExato($('pdvProdutoBusca').value);
+  $('pdvProdutoInfo').textContent = prod ? `${fmtMoney(prod.preco)} — estoque: ${prod.estoque}` : '';
 }
 function adicionarAoCarrinho(){
-  const prodId = $('pdvProduto').value;
-  const prod = produtos.find(p=>p.id===prodId);
-  if(!prod){ toast('Cadastre um produto primeiro.'); return; }
+  const prod = buscarProdutoPorNomeExato($('pdvProdutoBusca').value);
+  if(!prod){ toast('Digite o nome exato de um produto ativo (use as sugestões).'); return; }
   const qtd = Number($('pdvQtd').value)||1;
-  const existente = carrinho.find(c=>c.produtoId===prodId);
+  const existente = carrinho.find(c=>c.produtoId===prod.id);
   if(existente){ existente.quantidade += qtd; }
   else { carrinho.push({produtoId: prod.id, produtoNome: prod.nome, precoUnit: prod.preco, custoUnit: Number(prod.custo)||0, quantidade: qtd}); }
   $('pdvQtd').value = 1;
+  $('pdvProdutoBusca').value = '';
+  $('pdvProdutoInfo').textContent = '';
   renderCarrinho();
 }
 function removerDoCarrinho(index){ carrinho.splice(Number(index), 1); renderCarrinho(); }
@@ -578,7 +607,14 @@ function atualizarSugestaoData(){
 }
 function marcarDataManual(){ crediarioDataEditadaManualmente = true; }
 
-function registrarVenda(){
+function cancelarEdicaoVenda(){
+  editandoVendaId = null;
+  carrinho = []; renderCarrinho();
+  $('bannerEdicao').style.display = 'none';
+  $('pdvCliente').value = ''; $('pdvPagamento').value = 'Pix'; toggleCrediarioBox();
+}
+
+async function registrarVenda(){
   if(!carrinho.length){ toast('Adicione ao menos um produto ao carrinho.'); return; }
   const cliId = $('pdvCliente').value;
   const cli = clientes.find(c=>c.id===cliId);
@@ -588,70 +624,106 @@ function registrarVenda(){
 
   if(pagamento === 'Crediário' && !cli){ toast('Selecione um cliente cadastrado para venda parcelada (avulso não pode).'); return; }
 
+  // Se está editando, cancela a venda original primeiro (devolve estoque, estorna financeiro/tarefas)
+  if(editandoVendaId){
+    await cancelarVendaInterno(editandoVendaId, 'Editada — substituída por nova versão');
+  }
+
   const itensVenda = carrinho.map(c=> ({
     produtoId:c.produtoId, produtoNome:c.produtoNome, quantidade:c.quantidade, precoUnit:c.precoUnit,
     custoUnit:c.custoUnit||0, subtotal:c.precoUnit*c.quantidade,
     lucro: c.custoUnit>0 ? (c.precoUnit-c.custoUnit)*c.quantidade : 0
   }));
   const lucroTotal = itensVenda.reduce((s,i)=> s+i.lucro, 0);
+
+  let entradaValor = 0;
+  if(pagamento === 'Crediário'){ entradaValor = Math.min(total, Math.max(0, Number($('crediarioEntrada').value)||0)); }
+
   const venda = {
     itens: itensVenda, total, lucroTotal, clienteId: cliId || null, clienteNome: cli ? cli.nome : 'Cliente avulso',
-    avulso, pagamento, createdAt: new Date().toISOString()
+    avulso, pagamento, entrada: entradaValor, status:'ativa', financeiroIds: [], tarefaIds: [],
+    createdAt: new Date().toISOString()
   };
 
-  col('vendas').add(venda).catch(firestoreErr);
-  carrinho.forEach(c=>{
-    const prod = produtos.find(p=>p.id===c.produtoId);
-    if(prod) col('produtos').doc(prod.id).update({ estoque: Math.max(0, Number(prod.estoque) - c.quantidade) }).catch(firestoreErr);
-  });
-  if(cli){ col('clientes').doc(cli.id).update({ totalGasto: Number(cli.totalGasto||0)+total, ultimaCompra: todayStr() }).catch(firestoreErr); }
+  try{
+    const vendaRef = await col('vendas').add(venda);
 
-  const descItens = itensVenda.map(i=> i.quantidade+'x '+i.produtoNome).join(', ');
-
-  if(pagamento !== 'Crediário'){
-    col('financeiro').add({ descricao: 'Venda: '+descItens+(cli?' — '+cli.nome:' — avulso'), tipo:'entrada', valor: total, data: todayStr(), recebido:true, createdAt: new Date().toISOString() }).catch(firestoreErr);
-  } else {
-    const parcelas = Math.max(2, Number($('crediarioParcelas').value)||2);
-    const intervalo = intervaloAtualDias();
-    const primeiraData = $('crediarioPrimeiraData').value || addDays(todayStr(), intervalo);
-    const valorBase = Math.round((total/parcelas) * 100) / 100;
-    for(let i=0; i<parcelas; i++){
-      const vencimento = addDays(primeiraData, intervalo*i);
-      const valorParcela = (i === parcelas-1) ? Math.round((total - valorBase*(parcelas-1))*100)/100 : valorBase;
-      col('financeiro').add({
-        descricao: `Parcela ${i+1}/${parcelas} — ${descItens} — ${cli.nome}`,
-        tipo:'entrada', valor: valorParcela, data: vencimento, recebido:false, createdAt: new Date().toISOString()
-      }).then(ref=>{
-        col('itens').add({
-          texto: `Receber parcela ${i+1}/${parcelas} de ${cli.nome} — ${fmtMoney(valorParcela)}`,
-          tipo:'tarefa', data: vencimento, concluido:false, prioridadeDoDia:false,
-          origem:'crediario', lancamentoId: ref.id, clienteId: cli.id, clienteNome: cli.nome,
-          clienteWhats: cli.whatsapp||null, valor: valorParcela, parcelaNum: i+1, parcelaTotal: parcelas,
-          createdAt: new Date().toISOString()
-        }).catch(firestoreErr);
-      }).catch(firestoreErr);
+    for(const c of carrinho){
+      const prod = produtos.find(p=>p.id===c.produtoId);
+      if(prod){
+        const novoEstoque = Math.max(0, Number(prod.estoque) - c.quantidade);
+        await col('produtos').doc(prod.id).update({ estoque: novoEstoque, ativo: novoEstoque>0 });
+      }
     }
-  }
+    if(cli){ await col('clientes').doc(cli.id).update({ totalGasto: Number(cli.totalGasto||0)+total, ultimaCompra: todayStr() }); }
 
-  mostrarRecibo(venda);
-  carrinho = []; renderCarrinho();
-  $('pdvPagamento').value = 'Pix'; toggleCrediarioBox();
-  $('pdvCliente').value = '';
+    const descItens = itensVenda.map(i=> i.quantidade+'x '+i.produtoNome).join(', ');
+    const financeiroIds = [];
+    const tarefaIds = [];
+    const parcelasInfo = [];
+
+    if(pagamento !== 'Crediário'){
+      const ref = await col('financeiro').add({ descricao: 'Venda: '+descItens+(cli?' — '+cli.nome:' — avulso'), categoria:null, tipo:'entrada', valor: total, data: todayStr(), recebido:true, vendaId: vendaRef.id, createdAt: new Date().toISOString() });
+      financeiroIds.push(ref.id);
+    } else {
+      if(entradaValor > 0){
+        const refEntrada = await col('financeiro').add({ descricao: `Entrada — venda ${descItens} — ${cli.nome}`, categoria:null, tipo:'entrada', valor: entradaValor, data: todayStr(), recebido:true, vendaId: vendaRef.id, createdAt: new Date().toISOString() });
+        financeiroIds.push(refEntrada.id);
+      }
+      const valorParcelar = Math.round((total - entradaValor)*100)/100;
+      if(valorParcelar > 0){
+        const parcelas = Math.max(1, Number($('crediarioParcelas').value)||1);
+        const intervalo = intervaloAtualDias();
+        const primeiraData = $('crediarioPrimeiraData').value || addDays(todayStr(), intervalo);
+        const valorBase = Math.round((valorParcelar/parcelas) * 100) / 100;
+        for(let i=0; i<parcelas; i++){
+          const vencimento = addDays(primeiraData, intervalo*i);
+          const valorParcela = (i === parcelas-1) ? Math.round((valorParcelar - valorBase*(parcelas-1))*100)/100 : valorBase;
+          const finRef = await col('financeiro').add({
+            descricao: `Parcela ${i+1}/${parcelas} — ${descItens} — ${cli.nome}`, categoria:null,
+            tipo:'entrada', valor: valorParcela, data: vencimento, recebido:false, vendaId: vendaRef.id, createdAt: new Date().toISOString()
+          });
+          financeiroIds.push(finRef.id);
+          const tarefaRef = await col('itens').add({
+            texto: `Receber parcela ${i+1}/${parcelas} de ${cli.nome} — ${fmtMoney(valorParcela)}`,
+            tipo:'tarefa', data: vencimento, concluido:false, prioridadeDoDia:false,
+            origem:'crediario', lancamentoId: finRef.id, clienteId: cli.id, clienteNome: cli.nome,
+            clienteWhats: cli.whatsapp||null, valor: valorParcela, parcelaNum: i+1, parcelaTotal: parcelas,
+            vendaId: vendaRef.id, createdAt: new Date().toISOString()
+          });
+          tarefaIds.push(tarefaRef.id);
+          parcelasInfo.push({numero:i+1, total:parcelas, valor:valorParcela, vencimento});
+        }
+      }
+    }
+    await vendaRef.update({ financeiroIds, tarefaIds });
+
+    mostrarRecibo({...venda, id: vendaRef.id}, parcelasInfo);
+    carrinho = []; renderCarrinho();
+    $('pdvPagamento').value = 'Pix'; toggleCrediarioBox();
+    $('pdvCliente').value = '';
+    editandoVendaId = null;
+    $('bannerEdicao').style.display = 'none';
+    toast('Venda registrada.');
+  } catch(e){ firestoreErr(e); }
 }
 
-function mostrarRecibo(venda){
+function mostrarRecibo(venda, parcelasInfo){
   const linhas = venda.itens.map(i=> `${i.quantidade}x ${i.produtoNome} — ${fmtMoney(i.subtotal)}`).join('\n');
-  const texto = `🖤 NK Premium — Recibo\n\nCliente: ${venda.clienteNome}\n\n${linhas}\n\nTotal: ${fmtMoney(venda.total)}\nPagamento: ${venda.pagamento}${venda.pagamento==='Crediário'?' (parcelado)':''}\n\nObrigado pela preferência! 🖤`;
+  let texto = `🖤 NK Premium — Recibo\n\nCliente: ${venda.clienteNome}\n\n${linhas}\n\nTotal: ${fmtMoney(venda.total)}\nPagamento: ${venda.pagamento}`;
+  if(venda.pagamento === 'Crediário'){
+    if(venda.entrada > 0) texto += `\nEntrada paga: ${fmtMoney(venda.entrada)}`;
+    if(parcelasInfo && parcelasInfo.length){
+      texto += `\n\nParcelas:`;
+      parcelasInfo.forEach(p=> texto += `\n${p.numero}/${p.total} — ${fmtMoney(p.valor)} — vence em ${p.vencimento}`);
+    }
+  }
+  texto += `\n\nObrigado pela preferência! 🖤`;
   $('reciboTexto').textContent = texto;
   const cli = clientes.find(c=>c.id===venda.clienteId);
   const btnWa = $('btnEnviarRecibo');
-  if(cli && cli.whatsapp){
-    btnWa.style.display = 'block';
-    ultimoRecibo = {texto, whats: cli.whatsapp};
-  } else {
-    btnWa.style.display = 'none';
-    ultimoRecibo = {texto, whats: null};
-  }
+  if(cli && cli.whatsapp){ btnWa.style.display = 'block'; ultimoRecibo = {texto, whats: cli.whatsapp}; }
+  else { btnWa.style.display = 'none'; ultimoRecibo = {texto, whats: null}; }
   openModal('modalRecibo');
 }
 function enviarRecibo(){
@@ -661,18 +733,81 @@ function enviarRecibo(){
 }
 
 function renderVendas(){
-  const hoje = todayStr();
-  const hojeList = vendas.filter(v=> (v.createdAt||'').slice(0,10)===hoje);
   const el = $('vendasHoje');
-  el.innerHTML = hojeList.length ? '' : '<div class="empty">Nenhuma venda registrada hoje.</div>';
-  hojeList.forEach(v=>{
+  const lista = [...vendas].slice(0,40);
+  el.innerHTML = lista.length ? '' : '<div class="empty">Nenhuma venda registrada ainda.</div>';
+  lista.forEach(v=>{
     const itensTxt = itensDaVenda(v).map(i=> i.quantidade+'x '+i.produtoNome).join(', ');
     const div = document.createElement('div');
-    div.className = 'list-item';
-    div.innerHTML = `<div class="title">${escapeHtml(itensTxt)} ${v.avulso?'<span class="tag wait">AVULSO</span>':(v.clienteNome?'— '+escapeHtml(v.clienteNome):'')} ${v.pagamento==='Crediário'?'<span class="tag imp">CREDIÁRIO</span>':''}</div>
-      <span class="mono">${fmtMoney(v.total)}${v.lucroTotal ? ' <span style="color:var(--ok); font-size:11px;">(lucro '+fmtMoney(v.lucroTotal)+')</span>' : ''}</span>`;
+    div.className = 'list-item' + (v.status==='cancelada' ? ' cancelada' : '');
+    const data = (v.createdAt||'').slice(0,10);
+    let botoes = '';
+    if(v.status !== 'cancelada'){
+      botoes = `<button class="mini-btn" data-action="editar-venda" data-id="${v.id}">✎ Editar</button>
+        <button class="mini-btn btn-danger-ghost" data-action="cancelar-venda" data-id="${v.id}">Cancelar</button>`;
+    } else {
+      botoes = `<span class="tag urg">CANCELADA</span>`;
+    }
+    div.innerHTML = `<div class="title">${escapeHtml(itensTxt)} ${v.avulso?'<span class="tag wait">AVULSO</span>':(v.clienteNome?'— '+escapeHtml(v.clienteNome):'')} ${v.pagamento==='Crediário'?'<span class="tag imp">CREDIÁRIO</span>':''} <span style="color:var(--text-dim); font-size:11px;">(${data})</span></div>
+      <span class="mono">${fmtMoney(v.total)}${v.lucroTotal ? ' <span style="color:var(--ok); font-size:11px;">(lucro '+fmtMoney(v.lucroTotal)+')</span>' : ''}</span>
+      ${botoes}`;
     el.appendChild(div);
   });
+}
+
+function editarVenda(id){
+  const v = vendas.find(x=>x.id===id);
+  if(!v){ toast('Venda não encontrada.'); return; }
+  if(v.status === 'cancelada'){ toast('Essa venda já está cancelada.'); return; }
+  carrinho = v.itens.map(i=> ({produtoId:i.produtoId, produtoNome:i.produtoNome, precoUnit:i.precoUnit, custoUnit:i.custoUnit||0, quantidade:i.quantidade}));
+  renderCarrinho();
+  $('pdvCliente').value = v.clienteId || '';
+  $('pdvPagamento').value = v.pagamento;
+  toggleCrediarioBox();
+  if(v.pagamento === 'Crediário'){ $('crediarioEntrada').value = v.entrada || 0; }
+  editandoVendaId = id;
+  $('bannerEdicaoTexto').textContent = `Editando venda de ${v.clienteNome} (${fmtMoney(v.total)}) — ajuste os itens e finalize.`;
+  $('bannerEdicao').style.display = 'flex';
+  document.querySelector('.nav-item[data-view="pdv"]').click();
+  toast('Ajuste o carrinho e finalize para salvar as mudanças.');
+}
+
+function abrirModalCancelarVenda(id){ vendaEmCancelamento = id; $('motivoCancelamento').value=''; openModal('modalCancelarVenda'); }
+async function confirmarCancelamentoVenda(){
+  if(!vendaEmCancelamento) return;
+  const motivo = $('motivoCancelamento').value.trim();
+  try{
+    await cancelarVendaInterno(vendaEmCancelamento, motivo);
+    closeModal('modalCancelarVenda');
+    toast('Venda cancelada e estoque devolvido.');
+  } catch(e){ firestoreErr(e); }
+  vendaEmCancelamento = null;
+}
+async function cancelarVendaInterno(vendaId, motivo){
+  const v = vendas.find(x=>x.id===vendaId);
+  if(!v || v.status==='cancelada') return;
+  // devolve estoque
+  for(const item of (v.itens||[])){
+    const prod = produtos.find(p=>p.id===item.produtoId);
+    if(prod){
+      const novoEstoque = Number(prod.estoque||0) + Number(item.quantidade||0);
+      await col('produtos').doc(prod.id).update({ estoque: novoEstoque, ativo: true });
+    }
+  }
+  // cancela lançamentos financeiros vinculados
+  for(const finId of (v.financeiroIds||[])){
+    await col('financeiro').doc(finId).update({ cancelado: true, recebido:false }).catch(()=>{});
+  }
+  // remove tarefas de cobrança vinculadas
+  for(const tarefaId of (v.tarefaIds||[])){
+    await col('itens').doc(tarefaId).delete().catch(()=>{});
+  }
+  // reverte total gasto do cliente
+  if(v.clienteId){
+    const cli = clientes.find(c=>c.id===v.clienteId);
+    if(cli){ await col('clientes').doc(cli.id).update({ totalGasto: Math.max(0, Number(cli.totalGasto||0)-Number(v.total||0)) }).catch(()=>{}); }
+  }
+  await col('vendas').doc(vendaId).update({ status:'cancelada', motivoCancelamento: motivo||'', canceladoEm: new Date().toISOString() });
 }
 
 // -------------------- FINANCEIRO --------------------
@@ -680,16 +815,13 @@ function salvarLancamento(){
   const desc = $('finDesc').value.trim();
   if(!desc){ toast('Informe a descrição.'); return; }
   col('financeiro').add({
-    descricao: desc, tipo: $('finTipo').value, valor: Number($('finValor').value)||0,
-    data: $('finData').value || todayStr(), recebido:true, createdAt: new Date().toISOString()
+    descricao: desc, tipo: $('finTipo').value, categoria: $('finCategoria').value || null,
+    valor: Number($('finValor').value)||0, data: $('finData').value || todayStr(), recebido:true, createdAt: new Date().toISOString()
   }).then(()=>{
     closeModal('modalLancamento');
     ['finDesc','finValor'].forEach(id=> $(id).value='');
     toast('Lançamento salvo.');
   }).catch(firestoreErr);
-}
-function marcarRecebido(id){
-  col('financeiro').doc(id).update({recebido: true}).then(()=> toast('Marcado como recebido.')).catch(firestoreErr);
 }
 function parseLoteFinLinha(linha){
   const parts = linha.split(';').map(s=>s.trim());
@@ -700,7 +832,8 @@ function parseLoteFinLinha(linha){
   const valor = parseFloat((parts[2]||'').replace(',', '.'));
   if(!descricao || isNaN(valor)) return {erro:true, nome:descricao||linha};
   const data = parts[3] || todayStr();
-  return {descricao, tipo, valor, data};
+  const categoria = parts[4] || null;
+  return {descricao, tipo, valor, data, categoria};
 }
 function processarLoteFin(){
   const linhas = $('loteFinTexto').value.split('\n').map(l=>l.trim()).filter(Boolean);
@@ -712,7 +845,7 @@ function processarLoteFin(){
     if(r.erro) invalidos.push(r.nome); else validos.push(r);
   });
   const promises = validos.map(l=> col('financeiro').add({
-    descricao:l.descricao, tipo:l.tipo, valor:l.valor, data:l.data, recebido:true, createdAt: new Date().toISOString()
+    descricao:l.descricao, tipo:l.tipo, valor:l.valor, data:l.data, categoria:l.categoria, recebido:true, createdAt: new Date().toISOString()
   }));
   Promise.all(promises).then(()=>{
     let resultado = `✅ ${validos.length} lançamento(s) registrado(s).`;
@@ -722,33 +855,55 @@ function processarLoteFin(){
     toast('Lote lançado.');
   }).catch(firestoreErr);
 }
+function marcarRecebido(id){
+  col('financeiro').doc(id).update({recebido: true}).then(()=> toast('Marcado como recebido.')).catch(firestoreErr);
+}
+function setFiltroFinanceiro(f){
+  filtroFinanceiro = (filtroFinanceiro === f) ? 'todos' : f;
+  ['cardEntrada','cardAReceber','cardSaidas'].forEach(id=> $(id).classList.remove('filter-active'));
+  const map = {entrada:'cardEntrada', areceber:'cardAReceber', saida:'cardSaidas'};
+  if(map[filtroFinanceiro]) $(map[filtroFinanceiro]).classList.add('filter-active');
+  const labels = {todos:'todos os lançamentos', entrada:'entradas recebidas', areceber:'parcelas a receber (por vencimento)', saida:'saídas'};
+  $('filtroFinanceiroLabel').textContent = 'Mostrando: ' + labels[filtroFinanceiro];
+  renderFinanceiro();
+}
 function renderFinanceiro(){
+  const naoCancelados = lancamentos.filter(l=> !l.cancelado);
   const mesAtual = todayStr().slice(0,7);
-  const doMes = lancamentos.filter(l=> (l.data||'').slice(0,7)===mesAtual);
+  const doMes = naoCancelados.filter(l=> (l.data||'').slice(0,7)===mesAtual);
   const entradas = doMes.filter(l=>l.tipo==='entrada' && l.recebido!==false).reduce((s,l)=>s+Number(l.valor),0);
   const saidas = doMes.filter(l=>l.tipo==='saida').reduce((s,l)=>s+Number(l.valor),0);
-  const aReceber = lancamentos.filter(l=>l.tipo==='entrada' && l.recebido===false).reduce((s,l)=>s+Number(l.valor),0);
+  const aReceber = naoCancelados.filter(l=>l.tipo==='entrada' && l.recebido===false).reduce((s,l)=>s+Number(l.valor),0);
   $('finEntradas').textContent = fmtMoney(entradas);
   $('finSaidas').textContent = fmtMoney(saidas);
-  $('finSaldo').textContent = fmtMoney(entradas - saidas);
   $('finAReceber').textContent = fmtMoney(aReceber);
 
-  const lucroMes = vendas.filter(v=> (v.createdAt||'').slice(0,7)===mesAtual).reduce((s,v)=> s+Number(v.lucroTotal||0), 0);
+  const lucroMes = vendasValidas().filter(v=> (v.createdAt||'').slice(0,7)===mesAtual).reduce((s,v)=> s+Number(v.lucroTotal||0), 0);
   $('finLucro').textContent = fmtMoney(lucroMes);
-  const estoqueCusto = produtos.reduce((s,p)=> s + Number(p.custo||0)*Number(p.estoque||0), 0);
-  const estoqueVenda = produtos.reduce((s,p)=> s + Number(p.preco||0)*Number(p.estoque||0), 0);
+  const estoqueCusto = produtosAtivos().reduce((s,p)=> s + Number(p.custo||0)*Number(p.estoque||0), 0);
   $('finEstoqueCusto').textContent = fmtMoney(estoqueCusto);
-  $('finEstoqueVenda').textContent = fmtMoney(estoqueVenda);
+  $('finFaturamentoPrevisto').textContent = fmtMoney(entradas + aReceber);
+
+  let visiveis = naoCancelados;
+  if(filtroFinanceiro === 'entrada') visiveis = naoCancelados.filter(l=> l.tipo==='entrada' && l.recebido!==false);
+  else if(filtroFinanceiro === 'areceber') visiveis = naoCancelados.filter(l=> l.tipo==='entrada' && l.recebido===false);
+  else if(filtroFinanceiro === 'saida') visiveis = naoCancelados.filter(l=> l.tipo==='saida');
+
+  if(filtroFinanceiro === 'areceber'){
+    visiveis = [...visiveis].sort((a,b)=> (a.data||'9999').localeCompare(b.data||'9999'));
+  } else {
+    visiveis = [...visiveis].sort((a,b)=> (b.data||'').localeCompare(a.data||''));
+  }
 
   const tbl = $('tblFinanceiro');
   tbl.innerHTML = '';
-  $('finEmpty').style.display = lancamentos.length ? 'none' : 'block';
-  lancamentos.slice(0,80).forEach(l=>{
+  $('finEmpty').style.display = visiveis.length ? 'none' : 'block';
+  visiveis.slice(0,100).forEach(l=>{
     const tr = document.createElement('tr');
     let statusTag = '—';
     if(l.tipo==='entrada'){ statusTag = l.recebido===false ? '<span class="tag imp">Pendente</span>' : '<span class="tag deleg">Recebido</span>'; }
     const acao = (l.tipo==='entrada' && l.recebido===false) ? `<button class="mini-btn" data-action="marcar-recebido" data-id="${l.id}">Marcar recebido</button>` : '';
-    tr.innerHTML = `<td>${l.data}</td><td>${escapeHtml(l.descricao)}</td>
+    tr.innerHTML = `<td>${l.data}</td><td>${escapeHtml(l.descricao)}</td><td>${escapeHtml(l.categoria||'—')}</td>
       <td>${l.tipo==='entrada' ? '<span class="tag deleg">Entrada</span>' : '<span class="tag urg">Saída</span>'}</td>
       <td>${statusTag} ${acao}</td>
       <td class="mono">${fmtMoney(l.valor)}</td>`;
@@ -782,6 +937,8 @@ function bindStaticEvents(){
   $('btnSalvarCaptura').addEventListener('click', saveCapture);
   $('btnNovoProduto').addEventListener('click', ()=> openModal('modalProduto'));
   $('btnSalvarProduto').addEventListener('click', salvarProduto);
+  $('btnFiltroAtivos').addEventListener('click', ()=> setFiltroEstoque('ativos'));
+  $('btnFiltroInativos').addEventListener('click', ()=> setFiltroEstoque('inativos'));
   $('btnNovoCliente').addEventListener('click', ()=> openModal('modalCliente'));
   $('btnSalvarCliente').addEventListener('click', salvarCliente);
   $('btnNovoLancamento').addEventListener('click', ()=> openModal('modalLancamento'));
@@ -790,6 +947,8 @@ function bindStaticEvents(){
   $('btnProcessarLoteFin').addEventListener('click', processarLoteFin);
   $('btnAddCarrinho').addEventListener('click', adicionarAoCarrinho);
   $('btnRegistrarVenda').addEventListener('click', registrarVenda);
+  $('btnCancelarEdicao').addEventListener('click', cancelarEdicaoVenda);
+  $('pdvProdutoBusca').addEventListener('input', atualizarInfoProduto);
   $('btnGerarCatalogo').addEventListener('click', gerarCatalogo);
   $('btnCopiarCatalogo').addEventListener('click', ()=> copiarTexto($('catalogoTexto').textContent));
   $('btnListaLote').addEventListener('click', ()=> openModal('modalListaLote'));
@@ -802,6 +961,7 @@ function bindStaticEvents(){
   $('crediarioPrimeiraData').addEventListener('input', marcarDataManual);
   $('btnCopiarRecibo').addEventListener('click', ()=> copiarTexto($('reciboTexto').textContent));
   $('btnEnviarRecibo').addEventListener('click', enviarRecibo);
+  $('btnConfirmarCancelamento').addEventListener('click', confirmarCancelamentoVenda);
   $('btnMesAnterior').addEventListener('click', ()=> mudarMes(-1));
   $('btnMesProximo').addEventListener('click', ()=> mudarMes(1));
   $('btnExportarBackup').addEventListener('click', exportarBackup);
@@ -832,6 +992,8 @@ function bindStaticEvents(){
   });
 
   document.body.addEventListener('click', function(e){
+    const filterEl = e.target.closest('[data-filter]');
+    if(filterEl){ setFiltroFinanceiro(filterEl.dataset.filter); return; }
     const el = e.target.closest('[data-action]');
     if(!el) return;
     const id = el.dataset.id;
@@ -844,11 +1006,14 @@ function bindStaticEvents(){
       'prazo-amanha': ()=> setPrazoRapido(id, 1),
       'cobrar-item': ()=> cobrarItem(id),
       'excluir-produto': ()=> excluirProduto(id),
+      'reativar-produto': ()=> reativarProduto(id),
       'excluir-cliente': ()=> excluirCliente(id),
       'cobrar-cliente': ()=> cobrarCliente(id),
       'marcar-recebido': ()=> marcarRecebido(id),
       'remover-carrinho': ()=> removerDoCarrinho(el.dataset.index),
-      'agenda-dia': ()=> mostrarAgendaDia(el.dataset.date)
+      'agenda-dia': ()=> mostrarAgendaDia(el.dataset.date),
+      'editar-venda': ()=> editarVenda(id),
+      'cancelar-venda': ()=> abrirModalCancelarVenda(id)
     };
     if(actions[action]) actions[action]();
   });
