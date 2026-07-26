@@ -146,7 +146,6 @@ td{padding:10px; border-bottom:1px solid var(--border);}
     <input id="loginPass" type="password" placeholder="Senha" autocomplete="current-password">
     <div class="err" id="loginErr"></div>
     <button class="btn-primary" id="btnLogin">Entrar</button>
-    <button class="btn-ghost" id="btnSignup">Criar conta (primeiro acesso)</button>
     <button class="btn-ghost" id="btnEsqueciSenha" style="font-size:12px;">Esqueci minha senha</button>
   </div>
 </div>
@@ -187,6 +186,7 @@ td{padding:10px; border-bottom:1px solid var(--border);}
         <div class="stat"><div class="label">🟡 Hoje</div><div class="value mono" id="statHoje">0</div></div>
         <div class="stat"><div class="label">📦 Estoque baixo</div><div class="value mono" id="statEstoqueBaixo">0</div></div>
         <div class="stat"><div class="label">💰 Faturado hoje</div><div class="value mono" id="statFaturado">R$ 0</div></div>
+        <div class="stat"><div class="label">🏆 Mais vendido (mês)</div><div class="value" id="statMaisVendido" style="font-size:15px;">—</div></div>
       </div>
       <div class="section-title">Foco de agora (máx. 3)</div>
       <div id="focusList"></div>
@@ -242,8 +242,12 @@ td{padding:10px; border-bottom:1px solid var(--border);}
           <div id="carrinhoLista"><div class="empty">Carrinho vazio. Adicione produtos acima.</div></div>
           <div style="text-align:right; font-weight:700; margin-top:6px; font-size:16px;" id="carrinhoTotal"></div>
 
-          <span class="field-label" style="margin-top:18px;">Cliente</span>
+          <span class="field-label" style="margin-top:18px; display:flex; justify-content:space-between; align-items:center;">Cliente <button class="mini-btn" id="btnNovoClientePDV" style="margin:0;">+ Novo cliente</button></span>
           <select id="pdvCliente"><option value="">Cliente avulso</option></select>
+
+          <span class="field-label">Desconto (R$, opcional)</span>
+          <input id="pdvDesconto" type="number" step="0.01" value="0" min="0">
+          <input id="pdvDescontoMotivo" placeholder="Motivo do desconto" style="display:none; margin-top:8px;">
 
           <span class="field-label">Forma de pagamento</span>
           <select id="pdvPagamento">
@@ -301,8 +305,8 @@ td{padding:10px; border-bottom:1px solid var(--border);}
         <div class="stat filterable" data-filter="areceber" id="cardAReceber"><div class="label">A receber</div><div class="value mono" id="finAReceber">R$ 0</div></div>
         <div class="stat filterable" data-filter="saida" id="cardSaidas"><div class="label">Saídas (mês)</div><div class="value mono" id="finSaidas">R$ 0</div></div>
         <div class="stat"><div class="label">📦 Custo de estoque</div><div class="value mono" id="finEstoqueCusto">R$ 0</div></div>
-        <div class="stat"><div class="label">📈 Lucro (mês)</div><div class="value mono" id="finLucro">R$ 0</div></div>
-        <div class="stat"><div class="label">🔮 Faturamento previsto</div><div class="value mono" id="finFaturamentoPrevisto">R$ 0</div></div>
+        <div class="stat filterable" data-filter="lucro" id="cardLucro"><div class="label">📈 Lucro (mês)</div><div class="value mono" id="finLucro">R$ 0</div></div>
+        <div class="stat"><div class="label">🔮 Faturamento previsto (vender todo estoque)</div><div class="value mono" id="finFaturamentoPrevisto">R$ 0</div></div>
       </div>
       <div class="topbar" style="margin:18px 0 12px; flex-wrap:wrap; gap:8px;">
         <div id="filtroFinanceiroLabel" style="font-size:13px; color:var(--text-dim);">Mostrando: todos os lançamentos</div>
@@ -367,6 +371,24 @@ td{padding:10px; border-bottom:1px solid var(--border);}
         <p style="font-size:13px; color:var(--text-dim);" id="userEmailShow"></p>
         <h3 style="margin:18px 0 10px; font-size:14px;">Backup</h3>
         <button class="btn-ghost" id="btnExportarBackup">⬇ Exportar backup (JSON)</button>
+      </div>
+
+      <div class="card" id="painelCriarUsuario" style="display:none; margin-top:16px;">
+        <h3 style="margin-bottom:6px; font-size:14px;">👥 Criar usuário</h3>
+        <p style="font-size:12px; color:var(--text-dim); margin-bottom:14px; line-height:1.6;">
+          Só você (administrador) pode criar acessos. Quem você criar aqui enxerga os mesmos
+          dados do painel (estoque, vendas, clientes, financeiro).
+        </p>
+        <span class="field-label">Nome</span>
+        <input id="novoUsuarioNome" placeholder="Nome da pessoa">
+        <span class="field-label">E-mail</span>
+        <input id="novoUsuarioEmail" type="email" placeholder="pessoa@gmail.com">
+        <span class="field-label">Senha inicial</span>
+        <input id="novoUsuarioSenha" type="text" placeholder="Mínimo 6 caracteres">
+        <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnCriarUsuarioEquipe">Criar acesso</button>
+
+        <div class="section-title">Usuários com acesso</div>
+        <div id="listaEquipe"><div class="empty">Nenhum usuário adicional criado ainda.</div></div>
       </div>
     </section>
   </main>
