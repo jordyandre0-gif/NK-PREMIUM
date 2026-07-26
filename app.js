@@ -5,6 +5,7 @@
 let currentUser = null;
 let UID = null;
 let isAdmin = false;
+let nomeVendedor = '';
 let equipe = [];
 let editandoProdutoId = null;
 let clienteVindoDoPDV = false;
@@ -98,11 +99,13 @@ auth.onAuthStateChanged(user => {
       currentUser = user; UID = user.uid;
       isAdmin = (UID === WORKSPACE_ID);
       if(isAdmin){
+        nomeVendedor = 'Administrador';
         entrarNoPainel(user);
       } else {
         // confere se esse UID está na lista de equipe autorizada
         db.collection('users').doc(WORKSPACE_ID).collection('equipe').doc(UID).get().then(doc=>{
           if(doc.exists && doc.data().ativo !== false){
+            nomeVendedor = doc.data().nome || doc.data().email || user.email;
             entrarNoPainel(user);
           } else {
             $('loginErr').textContent = 'Seu acesso não foi autorizado pelo administrador.';
@@ -391,6 +394,7 @@ function renderDashboard(){
   });
 
   renderRanking();
+  renderGrafico();
 
   let resumo = [];
   if(estoqueBaixo.length) resumo.push(`${estoqueBaixo.length} produto(s) com estoque baixo — considere repor.`);
@@ -420,6 +424,24 @@ function renderRanking(){
     div.innerHTML = `<div class="title">${idx+1}º — ${escapeHtml(nome)}</div><span class="mono">${qtd} un.</span>`;
     el.appendChild(div);
   });
+}
+function renderGrafico(){
+  const el = $('graficoVendas');
+  if(!el) return;
+  const dias = [];
+  for(let i=6;i>=0;i--){ const d = new Date(); d.setDate(d.getDate()-i); dias.push(d.toISOString().slice(0,10)); }
+  const totais = dias.map(d=> vendasValidas().filter(v=> (v.createdAt||'').slice(0,10)===d).reduce((s,v)=>s+Number(v.total||0),0));
+  const max = Math.max(...totais, 1);
+  el.innerHTML = '<div style="display:flex; align-items:flex-end; gap:8px; height:130px;">' +
+    dias.map((d,i)=>{
+      const alturaPct = Math.max(Math.round((totais[i]/max)*100), totais[i]>0 ? 4 : 1);
+      const [,mm,dd] = d.split('-');
+      return `<div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; gap:4px;">
+        <div style="font-size:10px; color:var(--text-dim); min-height:12px;">${totais[i]>0 ? fmtMoney(totais[i]).replace('R$ ','') : ''}</div>
+        <div style="width:100%; background:var(--gold); border-radius:4px 4px 0 0; height:${alturaPct}%;"></div>
+        <div style="font-size:10px; color:var(--text-dim);">${dd}/${mm}</div>
+      </div>`;
+    }).join('') + '</div>';
 }
 
 // -------------------- ESTOQUE --------------------
@@ -484,9 +506,11 @@ function setFiltroEstoque(f){
 function renderEstoque(){
   const tbl = $('tblEstoque');
   tbl.innerHTML = '';
-  const filtrados = ordenarPorNome(produtos.filter(p=> filtroEstoque==='ativos' ? p.ativo!==false : p.ativo===false));
+  const busca = ($('buscaEstoqueInput').value||'').trim().toLowerCase();
+  let filtrados = ordenarPorNome(produtos.filter(p=> filtroEstoque==='ativos' ? p.ativo!==false : p.ativo===false));
+  if(busca) filtrados = filtrados.filter(p=> p.nome.toLowerCase().includes(busca));
   $('estoqueEmpty').style.display = filtrados.length ? 'none' : 'block';
-  $('estoqueEmpty').textContent = filtroEstoque==='ativos' ? 'Nenhum produto ativo cadastrado.' : 'Nenhum produto inativo (sem estoque zerado).';
+  $('estoqueEmpty').textContent = busca ? 'Nenhum produto encontrado com esse nome.' : (filtroEstoque==='ativos' ? 'Nenhum produto ativo cadastrado.' : 'Nenhum produto inativo (sem estoque zerado).');
   filtrados.forEach(p=>{
     const baixo = Number(p.estoque) <= Number(p.minimo||0);
     const tr = document.createElement('tr');
@@ -679,8 +703,12 @@ function cobrarCliente(id){
 function renderClientes(){
   const tbl = $('tblClientes');
   tbl.innerHTML = '';
-  $('clientesEmpty').style.display = clientes.length ? 'none' : 'block';
-  ordenarPorNome(clientes).forEach(c=>{
+  const busca = ($('buscaClientesInput').value||'').trim().toLowerCase();
+  let lista = ordenarPorNome(clientes);
+  if(busca) lista = lista.filter(c=> c.nome.toLowerCase().includes(busca));
+  $('clientesEmpty').style.display = lista.length ? 'none' : 'block';
+  $('clientesEmpty').textContent = busca ? 'Nenhum cliente encontrado com esse nome.' : 'Nenhum cliente cadastrado ainda.';
+  lista.forEach(c=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${escapeHtml(c.nome)}</td><td>${escapeHtml(c.cpf||'—')}</td><td>${escapeHtml(c.whatsapp||'—')}</td>
       <td>${c.ultimaCompra ? fmtData(c.ultimaCompra) : '—'}</td><td class="mono">${fmtMoney(c.totalGasto||0)}</td>
@@ -741,6 +769,23 @@ function renderCarrinho(){
     el.appendChild(div);
   });
   $('carrinhoTotal').textContent = carrinho.length ? ('Total: ' + fmtMoney(total)) : '';
+  if($('pdvDividirPagamento') && $('pdvDividirPagamento').checked) atualizarValor2();
+}
+function calcularSubtotalCarrinho(){
+  return carrinho.reduce((s,c)=> s + c.precoUnit*c.quantidade, 0);
+}
+function toggleDivisaoPagamento(){
+  const dividir = $('pdvDividirPagamento').checked;
+  $('divisaoPagamentoBox').style.display = dividir ? 'block' : 'none';
+  $('pdvPagamento').disabled = dividir;
+  if(dividir){ $('pdvPagamento').value = 'Pix'; toggleCrediarioBox(); atualizarValor2(); }
+}
+function atualizarValor2(){
+  const subtotal = calcularSubtotalCarrinho();
+  const desconto = Math.min(subtotal, Math.max(0, Number($('pdvDesconto').value)||0));
+  const total = Math.round((subtotal - desconto)*100)/100;
+  const v1 = Math.min(total, Math.max(0, Number($('divValor1').value)||0));
+  $('divValor2').value = Math.round((total - v1)*100)/100;
 }
 function toggleCrediarioBox(){
   const show = $('pdvPagamento').value === 'Crediário';
@@ -769,6 +814,7 @@ function cancelarEdicaoVenda(){
   $('bannerEdicao').style.display = 'none';
   $('pdvCliente').value = ''; $('pdvPagamento').value = 'Pix'; toggleCrediarioBox();
   $('pdvDesconto').value = 0; $('pdvDescontoMotivo').value = ''; $('pdvDescontoMotivo').style.display = 'none';
+    $('pdvDividirPagamento').checked = false; $('divisaoPagamentoBox').style.display = 'none'; $('divValor1').value=''; $('divValor2').value=''; $('pdvPagamento').disabled = false;
 }
 
 async function registrarVenda(){
@@ -776,12 +822,24 @@ async function registrarVenda(){
   const cliId = $('pdvCliente').value;
   const cli = clientes.find(c=>c.id===cliId);
   const avulso = !cliId;
-  const pagamento = $('pdvPagamento').value;
+  const pagamentoDividido = $('pdvDividirPagamento').checked;
+  let pagamento = $('pdvPagamento').value;
   const subtotal = carrinho.reduce((s,c)=> s + c.precoUnit*c.quantidade, 0);
   const desconto = Math.min(subtotal, Math.max(0, Number($('pdvDesconto').value)||0));
   const descontoMotivo = $('pdvDescontoMotivo').value.trim();
   if(desconto > 0 && !descontoMotivo){ toast('Informe o motivo do desconto.'); return; }
   const total = Math.round((subtotal - desconto)*100)/100;
+
+  let divisaoInfo = null;
+  if(pagamentoDividido){
+    const m1 = $('divPagamento1').value, m2 = $('divPagamento2').value;
+    const v1 = Math.round((Number($('divValor1').value)||0)*100)/100;
+    const v2 = Math.round((Number($('divValor2').value)||0)*100)/100;
+    if(v1 <= 0 || v2 <= 0){ toast('Informe os dois valores da divisão de pagamento.'); return; }
+    if(Math.abs((v1+v2) - total) > 0.02){ toast('A soma dos dois valores precisa bater com o total da venda.'); return; }
+    divisaoInfo = [{metodo:m1, valor:v1}, {metodo:m2, valor:v2}];
+    pagamento = `Dividido (${m1} + ${m2})`;
+  }
 
   if(pagamento === 'Crediário' && !cli){ toast('Selecione um cliente cadastrado para venda parcelada (avulso não pode).'); return; }
 
@@ -803,6 +861,7 @@ async function registrarVenda(){
   const venda = {
     itens: itensVenda, total, lucroTotal, clienteId: cliId || null, clienteNome: cli ? cli.nome : 'Cliente avulso',
     avulso, pagamento, entrada: entradaValor, desconto, descontoMotivo: desconto>0 ? descontoMotivo : null,
+    vendedor: nomeVendedor || 'Administrador', divisaoPagamento: pagamentoDividido ? divisaoInfo : null,
     status:'ativa', financeiroIds: [], tarefaIds: [],
     createdAt: new Date().toISOString()
   };
@@ -865,6 +924,7 @@ async function registrarVenda(){
     $('pdvPagamento').value = 'Pix'; toggleCrediarioBox();
     $('pdvCliente').value = '';
     $('pdvDesconto').value = 0; $('pdvDescontoMotivo').value = ''; $('pdvDescontoMotivo').style.display = 'none';
+    $('pdvDividirPagamento').checked = false; $('divisaoPagamentoBox').style.display = 'none'; $('divValor1').value=''; $('divValor2').value=''; $('pdvPagamento').disabled = false;
     editandoVendaId = null;
     $('bannerEdicao').style.display = 'none';
     toast('Venda registrada.');
@@ -876,6 +936,9 @@ function mostrarRecibo(venda, parcelasInfo){
   let texto = `🖤 NK Premium — Recibo\n\nCliente: ${venda.clienteNome}\n\n${linhas}`;
   if(venda.desconto > 0) texto += `\n\nDesconto: -${fmtMoney(venda.desconto)} (${venda.descontoMotivo||''})`;
   texto += `\n\nTotal: ${fmtMoney(venda.total)}\nPagamento: ${venda.pagamento}`;
+  if(venda.divisaoPagamento && venda.divisaoPagamento.length===2){
+    texto += venda.divisaoPagamento.map(d=> `\n  ${d.metodo}: ${fmtMoney(d.valor)}`).join('');
+  }
   if(venda.pagamento === 'Crediário'){
     if(venda.entrada > 0) texto += `\nEntrada paga: ${fmtMoney(venda.entrada)}`;
     if(parcelasInfo && parcelasInfo.length){
@@ -913,7 +976,7 @@ function renderVendas(){
     } else {
       botoes = `<span class="tag urg">CANCELADA</span>`;
     }
-    div.innerHTML = `<div class="title">${escapeHtml(itensTxt)} ${v.avulso?'<span class="tag wait">AVULSO</span>':(v.clienteNome?'— '+escapeHtml(v.clienteNome):'')} ${v.pagamento==='Crediário'?'<span class="tag imp">CREDIÁRIO</span>':''} ${v.desconto>0?'<span class="tag imp">DESCONTO '+fmtMoney(v.desconto)+'</span>':''} <span style="color:var(--text-dim); font-size:11px;">(${data})</span></div>
+    div.innerHTML = `<div class="title">${escapeHtml(itensTxt)} ${v.avulso?'<span class="tag wait">AVULSO</span>':(v.clienteNome?'— '+escapeHtml(v.clienteNome):'')} ${v.pagamento==='Crediário'?'<span class="tag imp">CREDIÁRIO</span>':''} ${v.desconto>0?'<span class="tag imp">DESCONTO '+fmtMoney(v.desconto)+'</span>':''} <span style="color:var(--text-dim); font-size:11px;">(${data}${v.vendedor?' — '+escapeHtml(v.vendedor):''})</span></div>
       <span class="mono">${fmtMoney(v.total)}${v.lucroTotal ? ' <span style="color:var(--ok); font-size:11px;">(lucro '+fmtMoney(v.lucroTotal)+')</span>' : ''}</span>
       ${botoes}`;
     el.appendChild(div);
@@ -927,9 +990,21 @@ function editarVenda(id){
   carrinho = v.itens.map(i=> ({produtoId:i.produtoId, produtoNome:i.produtoNome, precoUnit:i.precoUnit, custoUnit:i.custoUnit||0, quantidade:i.quantidade}));
   renderCarrinho();
   $('pdvCliente').value = v.clienteId || '';
-  $('pdvPagamento').value = v.pagamento;
-  toggleCrediarioBox();
-  if(v.pagamento === 'Crediário'){ $('crediarioEntrada').value = v.entrada || 0; }
+  if(v.divisaoPagamento && v.divisaoPagamento.length===2){
+    $('pdvDividirPagamento').checked = true;
+    toggleDivisaoPagamento();
+    $('divPagamento1').value = v.divisaoPagamento[0].metodo;
+    $('divValor1').value = v.divisaoPagamento[0].valor;
+    $('divPagamento2').value = v.divisaoPagamento[1].metodo;
+    atualizarValor2();
+  } else {
+    $('pdvDividirPagamento').checked = false;
+    $('divisaoPagamentoBox').style.display = 'none';
+    $('pdvPagamento').disabled = false;
+    $('pdvPagamento').value = v.pagamento;
+    toggleCrediarioBox();
+    if(v.pagamento === 'Crediário'){ $('crediarioEntrada').value = v.entrada || 0; }
+  }
   $('pdvDesconto').value = v.desconto || 0;
   $('pdvDescontoMotivo').value = v.descontoMotivo || '';
   $('pdvDescontoMotivo').style.display = (v.desconto>0) ? 'block' : 'none';
@@ -1107,6 +1182,59 @@ function renderFinanceiro(){
 }
 
 // -------------------- BACKUP --------------------
+// -------------------- RELATÓRIO MENSAL (PDF via impressão) --------------------
+function gerarRelatorioMensal(){
+  const mesAtual = todayStr().slice(0,7);
+  const [ano, mesNum] = mesAtual.split('-');
+  const nomeMes = MESES[Number(mesNum)-1];
+
+  const vendasMes = vendasValidas().filter(v=> (v.createdAt||'').slice(0,7)===mesAtual)
+    .sort((a,b)=> (a.createdAt||'').localeCompare(b.createdAt||''));
+  const naoCancelados = lancamentos.filter(l=> !l.cancelado);
+  const entradas = naoCancelados.filter(l=> l.tipo==='entrada' && l.recebido!==false && (l.data||'').slice(0,7)===mesAtual).reduce((s,l)=>s+Number(l.valor),0);
+  const saidas = naoCancelados.filter(l=> l.tipo==='saida' && (l.data||'').slice(0,7)===mesAtual).reduce((s,l)=>s+Number(l.valor),0);
+  const lucro = vendasMes.reduce((s,v)=> s+Number(v.lucroTotal||0), 0);
+  const faturado = vendasMes.reduce((s,v)=> s+Number(v.total||0), 0);
+
+  let html = `
+    <h1 style="font-size:20px; margin-bottom:2px;">NK Premium — Relatório de ${nomeMes} de ${ano}</h1>
+    <p style="color:#666; font-size:12px; margin-bottom:18px;">Gerado em ${fmtData(todayStr())}</p>
+    <table style="width:100%; border-collapse:collapse; margin-bottom:22px; font-size:13px;">
+      <tr><td style="padding:6px 0; border-bottom:1px solid #ddd;">Faturamento do mês</td><td style="padding:6px 0; border-bottom:1px solid #ddd; text-align:right;"><b>${fmtMoney(faturado)}</b></td></tr>
+      <tr><td style="padding:6px 0; border-bottom:1px solid #ddd;">Lucro estimado</td><td style="padding:6px 0; border-bottom:1px solid #ddd; text-align:right;">${fmtMoney(lucro)}</td></tr>
+      <tr><td style="padding:6px 0; border-bottom:1px solid #ddd;">Entradas recebidas</td><td style="padding:6px 0; border-bottom:1px solid #ddd; text-align:right;">${fmtMoney(entradas)}</td></tr>
+      <tr><td style="padding:6px 0; border-bottom:1px solid #ddd;">Saídas</td><td style="padding:6px 0; border-bottom:1px solid #ddd; text-align:right;">${fmtMoney(saidas)}</td></tr>
+      <tr><td style="padding:6px 0;">Saldo do mês</td><td style="padding:6px 0; text-align:right;"><b>${fmtMoney(entradas - saidas)}</b></td></tr>
+      <tr><td style="padding:6px 0;">Total de vendas</td><td style="padding:6px 0; text-align:right;">${vendasMes.length}</td></tr>
+    </table>
+    <h2 style="font-size:14px; margin-bottom:8px;">Vendas do mês</h2>
+    <table style="width:100%; border-collapse:collapse; font-size:11px;">
+      <thead><tr style="border-bottom:2px solid #333;">
+        <th style="text-align:left; padding:4px;">Data</th><th style="text-align:left; padding:4px;">Itens</th>
+        <th style="text-align:left; padding:4px;">Cliente</th><th style="text-align:left; padding:4px;">Vendedor</th>
+        <th style="text-align:right; padding:4px;">Total</th>
+      </tr></thead>
+      <tbody>`;
+  if(!vendasMes.length){
+    html += `<tr><td colspan="5" style="padding:10px; text-align:center; color:#999;">Nenhuma venda neste mês.</td></tr>`;
+  }
+  vendasMes.forEach(v=>{
+    const itensTxt = itensDaVenda(v).map(i=> i.quantidade+'x '+i.produtoNome).join(', ');
+    html += `<tr style="border-bottom:1px solid #eee;">
+      <td style="padding:4px;">${fmtData((v.createdAt||'').slice(0,10))}</td>
+      <td style="padding:4px;">${escapeHtml(itensTxt)}</td>
+      <td style="padding:4px;">${escapeHtml(v.clienteNome||'')}</td>
+      <td style="padding:4px;">${escapeHtml(v.vendedor||'')}</td>
+      <td style="padding:4px; text-align:right;">${fmtMoney(v.total)}</td>
+    </tr>`;
+  });
+  html += `</tbody></table>`;
+
+  $('relatorioConteudo').innerHTML = html;
+  openModal('modalRelatorio');
+}
+function imprimirRelatorio(){ window.print(); }
+
 function exportarBackup(){
   const data = { exportadoEm: new Date().toISOString(), produtos, clientes, vendas, lancamentos, itens };
   const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
@@ -1134,17 +1262,24 @@ function bindStaticEvents(){
   $('btnNovoProduto').addEventListener('click', abrirModalNovoProduto);
   $('btnSalvarProduto').addEventListener('click', salvarProduto);
   $('btnFiltroAtivos').addEventListener('click', ()=> setFiltroEstoque('ativos'));
+  $('buscaEstoqueInput').addEventListener('input', renderEstoque);
+  $('buscaClientesInput').addEventListener('input', renderClientes);
   $('btnFiltroInativos').addEventListener('click', ()=> setFiltroEstoque('inativos'));
   $('btnNovoCliente').addEventListener('click', abrirModalNovoCliente);
   $('btnNovoClientePDV').addEventListener('click', abrirNovoClienteDoPDV);
   $('pdvDesconto').addEventListener('input', ()=>{
     const v = Number($('pdvDesconto').value)||0;
     $('pdvDescontoMotivo').style.display = v > 0 ? 'block' : 'none';
+    if($('pdvDividirPagamento').checked) atualizarValor2();
   });
+  $('pdvDividirPagamento').addEventListener('change', toggleDivisaoPagamento);
+  $('divValor1').addEventListener('input', atualizarValor2);
   $('btnSalvarCliente').addEventListener('click', salvarCliente);
   $('btnNovoLancamento').addEventListener('click', ()=> openModal('modalLancamento'));
   $('btnSalvarLancamento').addEventListener('click', salvarLancamento);
   $('btnLancamentoLote').addEventListener('click', ()=> openModal('modalLancamentoLote'));
+  $('btnExportarRelatorio').addEventListener('click', gerarRelatorioMensal);
+  $('btnImprimirRelatorio').addEventListener('click', imprimirRelatorio);
   $('btnProcessarLoteFin').addEventListener('click', processarLoteFin);
   $('btnAddCarrinho').addEventListener('click', adicionarAoCarrinho);
   $('btnRegistrarVenda').addEventListener('click', registrarVenda);
