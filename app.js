@@ -4,7 +4,10 @@
 
 let currentUser = null;
 let UID = null;
+let isAdmin = false;
+let equipe = [];
 let editandoProdutoId = null;
+let clienteVindoDoPDV = false;
 let produtos = [], clientes = [], vendas = [], lancamentos = [], itens = [];
 let selectedCaptureType = null;
 let carrinho = [];
@@ -33,12 +36,17 @@ function waLink(phone, text){
   return 'https://wa.me/'+full+'?text='+encodeURIComponent(text);
 }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent = s==null?'':String(s); return d.innerHTML; }
+function fmtData(iso){
+  if(!iso || iso.length < 10) return '—';
+  const [y,m,d] = iso.slice(0,10).split('-');
+  return `${d}/${m}/${y}`;
+}
 function toast(msg){
   const t = $('toast'); t.textContent = msg; t.style.display='block';
   clearTimeout(window._toastTimer);
   window._toastTimer = setTimeout(()=> t.style.display='none', 3600);
 }
-function col(name){ return db.collection('users').doc(UID).collection(name); }
+function col(name){ return db.collection('users').doc(WORKSPACE_ID).collection(name); }
 function firestoreErr(e){ console.error(e); toast('Erro ao salvar: ' + (e && e.message ? e.message : e)); }
 function produtosAtivos(){ return produtos.filter(p=> p.ativo !== false); }
 function ordenarPorNome(arr){ return [...arr].sort((a,b)=> (a.nome||'').localeCompare(b.nome||'', 'pt-BR')); }
@@ -62,13 +70,6 @@ function doLogin(){
   $('loginErr').textContent = '';
   auth.signInWithEmailAndPassword(email, pass).catch(e => $('loginErr').textContent = traduzErro(e));
 }
-function doSignup(){
-  const email = $('loginEmail').value.trim();
-  const pass = $('loginPass').value;
-  $('loginErr').textContent = '';
-  if(!email || pass.length < 6){ $('loginErr').textContent = 'Preencha e-mail e senha (mín. 6 caracteres).'; return; }
-  auth.createUserWithEmailAndPassword(email, pass).catch(e => $('loginErr').textContent = traduzErro(e));
-}
 function doLogout(){ auth.signOut(); }
 function doResetPassword(){
   const email = $('loginEmail').value.trim();
@@ -85,7 +86,7 @@ function doResetPassword(){
 function traduzErro(e){
   const map = {
     'auth/invalid-email':'E-mail inválido.', 'auth/user-not-found':'Usuário não encontrado.',
-    'auth/wrong-password':'Senha incorreta.', 'auth/email-already-in-use':'Este e-mail já tem conta — tente entrar.',
+    'auth/wrong-password':'Senha incorreta.', 'auth/email-already-in-use':'Este e-mail já tem conta.',
     'auth/weak-password':'Senha muito fraca (mín. 6 caracteres).', 'auth/invalid-credential':'E-mail ou senha incorretos.'
   };
   return map[e.code] || ('Erro: ' + e.message);
@@ -95,10 +96,23 @@ auth.onAuthStateChanged(user => {
   if(user){
     try{
       currentUser = user; UID = user.uid;
-      $('loginScreen').style.display = 'none';
-      $('app').classList.add('show');
-      $('userEmailShow').textContent = user.email;
-      startListeners();
+      isAdmin = (UID === WORKSPACE_ID);
+      if(isAdmin){
+        entrarNoPainel(user);
+      } else {
+        // confere se esse UID está na lista de equipe autorizada
+        db.collection('users').doc(WORKSPACE_ID).collection('equipe').doc(UID).get().then(doc=>{
+          if(doc.exists && doc.data().ativo !== false){
+            entrarNoPainel(user);
+          } else {
+            $('loginErr').textContent = 'Seu acesso não foi autorizado pelo administrador.';
+            auth.signOut();
+          }
+        }).catch(e=>{
+          $('loginErr').textContent = 'Erro ao verificar acesso: ' + e.message;
+          auth.signOut();
+        });
+      }
     } catch(erro){
       $('loginScreen').style.display = 'flex';
       $('app').classList.remove('show');
@@ -106,11 +120,69 @@ auth.onAuthStateChanged(user => {
       console.error(erro);
     }
   } else {
-    currentUser = null; UID = null;
+    currentUser = null; UID = null; isAdmin = false;
     $('loginScreen').style.display = 'flex';
     $('app').classList.remove('show');
   }
 });
+function entrarNoPainel(user){
+  $('loginScreen').style.display = 'none';
+  $('app').classList.add('show');
+  $('userEmailShow').textContent = user.email + (isAdmin ? ' (administrador)' : '');
+  const painelCriarUsuario = $('painelCriarUsuario');
+  if(painelCriarUsuario) painelCriarUsuario.style.display = isAdmin ? 'block' : 'none';
+  const navConfig = document.querySelector('.nav-item[data-view="config"]');
+  if(navConfig) navConfig.style.display = isAdmin ? '' : 'none';
+  startListeners();
+  if(isAdmin) startEquipeListener();
+}
+
+// -------------------- CRIAR USUÁRIO (admin, via app secundário) --------------------
+function criarUsuarioEquipe(){
+  if(!isAdmin){ toast('Só o administrador pode criar usuários.'); return; }
+  const email = $('novoUsuarioEmail').value.trim();
+  const senha = $('novoUsuarioSenha').value;
+  const nome = $('novoUsuarioNome').value.trim();
+  if(!email || !email.includes('@')){ toast('Informe um e-mail válido.'); return; }
+  if(!senha || senha.length < 6){ toast('A senha precisa ter no mínimo 6 caracteres.'); return; }
+  const nomeApp = 'CriarUsuario_' + Date.now();
+  const secundario = firebase.initializeApp(firebaseConfig, nomeApp);
+  secundario.auth().createUserWithEmailAndPassword(email, senha).then(cred=>{
+    const novoUid = cred.user.uid;
+    return db.collection('users').doc(WORKSPACE_ID).collection('equipe').doc(novoUid).set({
+      email, nome: nome || email, ativo: true, criadoEm: new Date().toISOString()
+    }).then(()=>{
+      toast('Usuário criado: ' + email);
+      $('novoUsuarioEmail').value=''; $('novoUsuarioSenha').value=''; $('novoUsuarioNome').value='';
+    });
+  }).catch(e=>{
+    toast('Erro ao criar usuário: ' + traduzErro(e));
+  }).finally(()=>{
+    secundario.auth().signOut().finally(()=> secundario.delete());
+  });
+}
+function startEquipeListener(){
+  db.collection('users').doc(WORKSPACE_ID).collection('equipe').onSnapshot(snap=>{
+    equipe = snap.docs.map(d=>({uid:d.id, ...d.data()}));
+    renderEquipe();
+  }, err=> console.error('equipe', err));
+}
+function renderEquipe(){
+  const el = $('listaEquipe');
+  if(!el) return;
+  el.innerHTML = equipe.length ? '' : '<div class="empty">Nenhum usuário adicional criado ainda.</div>';
+  equipe.forEach(u=>{
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = `<div class="title">${escapeHtml(u.nome||u.email)} <span style="color:var(--text-dim); font-size:11px;">(${escapeHtml(u.email)})</span></div>
+      <button class="mini-btn" data-action="remover-equipe" data-id="${u.uid}">Remover acesso</button>`;
+    el.appendChild(div);
+  });
+}
+function removerAcessoEquipe(uid){
+  if(!confirm('Remover o acesso dessa pessoa? Ela não vai mais conseguir ver os dados (mas a conta de login continua existindo).')) return;
+  db.collection('users').doc(WORKSPACE_ID).collection('equipe').doc(uid).delete().then(()=> toast('Acesso removido.')).catch(firestoreErr);
+}
 
 // -------------------- MODAL HELPERS --------------------
 function openModal(id){ $(id).classList.add('show'); }
@@ -174,7 +246,7 @@ function cobrarItem(id){
   const it = itens.find(i=>i.id===id);
   if(!it) return;
   if(!it.clienteWhats){ toast('Esse cliente não tem WhatsApp cadastrado.'); return; }
-  const msg = `Olá ${it.clienteNome||''}! Tudo bem? Passando para lembrar da parcela ${it.parcelaNum||''}/${it.parcelaTotal||''} no valor de ${fmtMoney(it.valor)}${it.data ? ', com vencimento em '+it.data : ''}. Qualquer dúvida me chama por aqui 🙂`;
+  const msg = `Olá ${it.clienteNome||''}! Tudo bem? Passando para lembrar da parcela ${it.parcelaNum||''}/${it.parcelaTotal||''} no valor de ${fmtMoney(it.valor)}${it.data ? ', com vencimento em '+fmtData(it.data) : ''}. Qualquer dúvida me chama por aqui 🙂`;
   const link = waLink(it.clienteWhats, msg);
   if(link) window.open(link, '_blank');
 }
@@ -226,7 +298,7 @@ function renderTaskGroup(elId, list, emptyMsg, mostrarCobrar){
     botoes += `<button class="mini-btn" data-action="excluir-item" data-id="${it.id}">✕</button>`;
     div.innerHTML = `
       <div class="chk" data-action="concluir-item" data-id="${it.id}"></div>
-      <div class="title">${escapeHtml(it.texto)} ${it.data ? '<span style="color:var(--text-dim); font-size:11px;">('+it.data+')</span>' : ''}</div>
+      <div class="title">${escapeHtml(it.texto)} ${it.data ? '<span style="color:var(--text-dim); font-size:11px;">('+fmtData(it.data)+')</span>' : ''}</div>
       ${botoes}`;
     el.appendChild(div);
   });
@@ -270,7 +342,8 @@ function mostrarAgendaDia(dateStr){
     div.className = 'list-item';
     let botoes = `<button class="mini-btn" data-action="concluir-item" data-id="${it.id}">${it.concluido?'✓ Concluída':'Marcar feita'}</button>`;
     if(it.clienteWhats) botoes += `<button class="mini-btn btn-wa" data-action="cobrar-item" data-id="${it.id}">💬 Cobrar</button>`;
-    div.innerHTML = `<div class="title">${escapeHtml(it.texto)}</div>${botoes}`;
+    botoes += `<button class="mini-btn btn-danger-ghost" data-action="excluir-item" data-id="${it.id}">Cancelar</button>`;
+    div.innerHTML = `<div class="title">${escapeHtml(it.texto)} <span style="color:var(--text-dim); font-size:11px;">(${fmtData(dateStr)})</span></div>${botoes}`;
     el.appendChild(div);
   });
 }
@@ -337,6 +410,8 @@ function renderRanking(){
     itensDaVenda(v).forEach(i=>{ contagem[i.produtoNome] = (contagem[i.produtoNome]||0) + Number(i.quantidade||0); });
   });
   const arr = Object.entries(contagem).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const statTop = $('statMaisVendido');
+  if(statTop) statTop.textContent = arr.length ? `${arr[0][0]} (${arr[0][1]}un)` : '—';
   const el = $('rankingProdutos');
   el.innerHTML = arr.length ? '' : '<div class="empty">Sem vendas suficientes este mês.</div>';
   arr.forEach(([nome, qtd], idx)=>{
@@ -555,12 +630,17 @@ function salvarCliente(){
     nome, cpf: $('cliCpf').value.trim(), whatsapp: $('cliWhats').value.trim(), instagram: $('cliInsta').value.trim(),
     obs: $('cliObs').value.trim(), totalGasto:0, ultimaCompra: null, createdAt: new Date().toISOString()
   };
-  col('clientes').add(c).then(()=>{
+  col('clientes').add(c).then((ref)=>{
     closeModal('modalCliente');
     ['cliNome','cliCpf','cliWhats','cliInsta','cliObs'].forEach(id=> $(id).value='');
     toast('Cliente salvo.');
+    if(clienteVindoDoPDV){
+      clienteVindoDoPDV = false;
+      setTimeout(()=>{ const sel = $('pdvCliente'); if(sel) sel.value = ref.id; }, 300);
+    }
   }).catch(firestoreErr);
 }
+function abrirNovoClienteDoPDV(){ clienteVindoDoPDV = true; openModal('modalCliente'); }
 function excluirCliente(id){ if(confirm('Excluir cliente?')) col('clientes').doc(id).delete().catch(firestoreErr); }
 function cobrarCliente(id){
   const c = clientes.find(x=>x.id===id);
@@ -576,7 +656,7 @@ function renderClientes(){
   ordenarPorNome(clientes).forEach(c=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${escapeHtml(c.nome)}</td><td>${escapeHtml(c.cpf||'—')}</td><td>${escapeHtml(c.whatsapp||'—')}</td>
-      <td>${c.ultimaCompra || '—'}</td><td class="mono">${fmtMoney(c.totalGasto||0)}</td>
+      <td>${c.ultimaCompra ? fmtData(c.ultimaCompra) : '—'}</td><td class="mono">${fmtMoney(c.totalGasto||0)}</td>
       <td style="white-space:nowrap;">
         ${c.whatsapp ? `<button class="mini-btn btn-wa" data-action="cobrar-cliente" data-id="${c.id}">💬</button>` : ''}
         <button class="mini-btn" data-action="excluir-cliente" data-id="${c.id}">✕</button>
@@ -655,10 +735,12 @@ function atualizarSugestaoData(){
 function marcarDataManual(){ crediarioDataEditadaManualmente = true; }
 
 function cancelarEdicaoVenda(){
+  if(!confirm('Cancelar a edição? O carrinho atual será descartado.')) return;
   editandoVendaId = null;
   carrinho = []; renderCarrinho();
   $('bannerEdicao').style.display = 'none';
   $('pdvCliente').value = ''; $('pdvPagamento').value = 'Pix'; toggleCrediarioBox();
+  $('pdvDesconto').value = 0; $('pdvDescontoMotivo').value = ''; $('pdvDescontoMotivo').style.display = 'none';
 }
 
 async function registrarVenda(){
@@ -667,7 +749,11 @@ async function registrarVenda(){
   const cli = clientes.find(c=>c.id===cliId);
   const avulso = !cliId;
   const pagamento = $('pdvPagamento').value;
-  const total = carrinho.reduce((s,c)=> s + c.precoUnit*c.quantidade, 0);
+  const subtotal = carrinho.reduce((s,c)=> s + c.precoUnit*c.quantidade, 0);
+  const desconto = Math.min(subtotal, Math.max(0, Number($('pdvDesconto').value)||0));
+  const descontoMotivo = $('pdvDescontoMotivo').value.trim();
+  if(desconto > 0 && !descontoMotivo){ toast('Informe o motivo do desconto.'); return; }
+  const total = Math.round((subtotal - desconto)*100)/100;
 
   if(pagamento === 'Crediário' && !cli){ toast('Selecione um cliente cadastrado para venda parcelada (avulso não pode).'); return; }
 
@@ -681,14 +767,15 @@ async function registrarVenda(){
     custoUnit:c.custoUnit||0, subtotal:c.precoUnit*c.quantidade,
     lucro: c.custoUnit>0 ? (c.precoUnit-c.custoUnit)*c.quantidade : 0
   }));
-  const lucroTotal = itensVenda.reduce((s,i)=> s+i.lucro, 0);
+  const lucroTotal = Math.round((itensVenda.reduce((s,i)=> s+i.lucro, 0) - desconto)*100)/100;
 
   let entradaValor = 0;
   if(pagamento === 'Crediário'){ entradaValor = Math.min(total, Math.max(0, Number($('crediarioEntrada').value)||0)); }
 
   const venda = {
     itens: itensVenda, total, lucroTotal, clienteId: cliId || null, clienteNome: cli ? cli.nome : 'Cliente avulso',
-    avulso, pagamento, entrada: entradaValor, status:'ativa', financeiroIds: [], tarefaIds: [],
+    avulso, pagamento, entrada: entradaValor, desconto, descontoMotivo: desconto>0 ? descontoMotivo : null,
+    status:'ativa', financeiroIds: [], tarefaIds: [],
     createdAt: new Date().toISOString()
   };
 
@@ -749,6 +836,7 @@ async function registrarVenda(){
     carrinho = []; renderCarrinho();
     $('pdvPagamento').value = 'Pix'; toggleCrediarioBox();
     $('pdvCliente').value = '';
+    $('pdvDesconto').value = 0; $('pdvDescontoMotivo').value = ''; $('pdvDescontoMotivo').style.display = 'none';
     editandoVendaId = null;
     $('bannerEdicao').style.display = 'none';
     toast('Venda registrada.');
@@ -757,12 +845,14 @@ async function registrarVenda(){
 
 function mostrarRecibo(venda, parcelasInfo){
   const linhas = venda.itens.map(i=> `${i.quantidade}x ${i.produtoNome} — ${fmtMoney(i.subtotal)}`).join('\n');
-  let texto = `🖤 NK Premium — Recibo\n\nCliente: ${venda.clienteNome}\n\n${linhas}\n\nTotal: ${fmtMoney(venda.total)}\nPagamento: ${venda.pagamento}`;
+  let texto = `🖤 NK Premium — Recibo\n\nCliente: ${venda.clienteNome}\n\n${linhas}`;
+  if(venda.desconto > 0) texto += `\n\nDesconto: -${fmtMoney(venda.desconto)} (${venda.descontoMotivo||''})`;
+  texto += `\n\nTotal: ${fmtMoney(venda.total)}\nPagamento: ${venda.pagamento}`;
   if(venda.pagamento === 'Crediário'){
     if(venda.entrada > 0) texto += `\nEntrada paga: ${fmtMoney(venda.entrada)}`;
     if(parcelasInfo && parcelasInfo.length){
       texto += `\n\nParcelas:`;
-      parcelasInfo.forEach(p=> texto += `\n${p.numero}/${p.total} — ${fmtMoney(p.valor)} — vence em ${p.vencimento}`);
+      parcelasInfo.forEach(p=> texto += `\n${p.numero}/${p.total} — ${fmtMoney(p.valor)} — vence em ${fmtData(p.vencimento)}`);
     }
   }
   texto += `\n\nObrigado pela preferência! 🖤`;
@@ -787,7 +877,7 @@ function renderVendas(){
     const itensTxt = itensDaVenda(v).map(i=> i.quantidade+'x '+i.produtoNome).join(', ');
     const div = document.createElement('div');
     div.className = 'list-item' + (v.status==='cancelada' ? ' cancelada' : '');
-    const data = (v.createdAt||'').slice(0,10);
+    const data = fmtData((v.createdAt||'').slice(0,10));
     let botoes = '';
     if(v.status !== 'cancelada'){
       botoes = `<button class="mini-btn" data-action="editar-venda" data-id="${v.id}">✎ Editar</button>
@@ -795,7 +885,7 @@ function renderVendas(){
     } else {
       botoes = `<span class="tag urg">CANCELADA</span>`;
     }
-    div.innerHTML = `<div class="title">${escapeHtml(itensTxt)} ${v.avulso?'<span class="tag wait">AVULSO</span>':(v.clienteNome?'— '+escapeHtml(v.clienteNome):'')} ${v.pagamento==='Crediário'?'<span class="tag imp">CREDIÁRIO</span>':''} <span style="color:var(--text-dim); font-size:11px;">(${data})</span></div>
+    div.innerHTML = `<div class="title">${escapeHtml(itensTxt)} ${v.avulso?'<span class="tag wait">AVULSO</span>':(v.clienteNome?'— '+escapeHtml(v.clienteNome):'')} ${v.pagamento==='Crediário'?'<span class="tag imp">CREDIÁRIO</span>':''} ${v.desconto>0?'<span class="tag imp">DESCONTO '+fmtMoney(v.desconto)+'</span>':''} <span style="color:var(--text-dim); font-size:11px;">(${data})</span></div>
       <span class="mono">${fmtMoney(v.total)}${v.lucroTotal ? ' <span style="color:var(--ok); font-size:11px;">(lucro '+fmtMoney(v.lucroTotal)+')</span>' : ''}</span>
       ${botoes}`;
     el.appendChild(div);
@@ -812,6 +902,9 @@ function editarVenda(id){
   $('pdvPagamento').value = v.pagamento;
   toggleCrediarioBox();
   if(v.pagamento === 'Crediário'){ $('crediarioEntrada').value = v.entrada || 0; }
+  $('pdvDesconto').value = v.desconto || 0;
+  $('pdvDescontoMotivo').value = v.descontoMotivo || '';
+  $('pdvDescontoMotivo').style.display = (v.desconto>0) ? 'block' : 'none';
   editandoVendaId = id;
   $('bannerEdicaoTexto').textContent = `Editando venda de ${v.clienteNome} (${fmtMoney(v.total)}) — ajuste os itens e finalize.`;
   $('bannerEdicao').style.display = 'flex';
@@ -907,10 +1000,10 @@ function marcarRecebido(id){
 }
 function setFiltroFinanceiro(f){
   filtroFinanceiro = (filtroFinanceiro === f) ? 'todos' : f;
-  ['cardEntrada','cardAReceber','cardSaidas'].forEach(id=> $(id).classList.remove('filter-active'));
-  const map = {entrada:'cardEntrada', areceber:'cardAReceber', saida:'cardSaidas'};
+  ['cardEntrada','cardAReceber','cardSaidas','cardLucro'].forEach(id=> $(id).classList.remove('filter-active'));
+  const map = {entrada:'cardEntrada', areceber:'cardAReceber', saida:'cardSaidas', lucro:'cardLucro'};
   if(map[filtroFinanceiro]) $(map[filtroFinanceiro]).classList.add('filter-active');
-  const labels = {todos:'todos os lançamentos', entrada:'entradas recebidas', areceber:'parcelas a receber (por vencimento)', saida:'saídas'};
+  const labels = {todos:'todos os lançamentos', entrada:'entradas recebidas', areceber:'parcelas a receber (por vencimento)', saida:'saídas', lucro:'lucro por venda'};
   $('filtroFinanceiroLabel').textContent = 'Mostrando: ' + labels[filtroFinanceiro];
   renderFinanceiro();
 }
@@ -929,7 +1022,26 @@ function renderFinanceiro(){
   $('finLucro').textContent = fmtMoney(lucroMes);
   const estoqueCusto = produtosAtivos().reduce((s,p)=> s + Number(p.custo||0)*Number(p.estoque||0), 0);
   $('finEstoqueCusto').textContent = fmtMoney(estoqueCusto);
-  $('finFaturamentoPrevisto').textContent = fmtMoney(entradas + aReceber);
+  const faturamentoPrevisto = produtosAtivos().reduce((s,p)=> s + Number(p.preco||0)*Number(p.estoque||0), 0);
+  $('finFaturamentoPrevisto').textContent = fmtMoney(faturamentoPrevisto);
+
+  const tbl = $('tblFinanceiro');
+  tbl.innerHTML = '';
+
+  if(filtroFinanceiro === 'lucro'){
+    const vendasDoMes = [...vendasValidas()].filter(v=> (v.createdAt||'').slice(0,7)===mesAtual)
+      .sort((a,b)=> (b.createdAt||'').localeCompare(a.createdAt||''));
+    $('finEmpty').style.display = vendasDoMes.length ? 'none' : 'block';
+    vendasDoMes.forEach(v=>{
+      const tr = document.createElement('tr');
+      const itensTxt = itensDaVenda(v).map(i=> i.quantidade+'x '+i.produtoNome).join(', ');
+      tr.innerHTML = `<td>${fmtData((v.createdAt||'').slice(0,10))}</td><td>${escapeHtml(itensTxt)}</td><td>${escapeHtml(v.clienteNome||'Avulso')}</td>
+        <td><span class="tag deleg">Venda</span></td><td>—</td>
+        <td class="mono" style="color:var(--ok);">${fmtMoney(v.lucroTotal||0)}</td>`;
+      tbl.appendChild(tr);
+    });
+    return;
+  }
 
   let visiveis = naoCancelados;
   if(filtroFinanceiro === 'entrada') visiveis = naoCancelados.filter(l=> l.tipo==='entrada' && l.recebido!==false);
@@ -942,15 +1054,13 @@ function renderFinanceiro(){
     visiveis = [...visiveis].sort((a,b)=> (b.data||'').localeCompare(a.data||''));
   }
 
-  const tbl = $('tblFinanceiro');
-  tbl.innerHTML = '';
   $('finEmpty').style.display = visiveis.length ? 'none' : 'block';
   visiveis.slice(0,100).forEach(l=>{
     const tr = document.createElement('tr');
     let statusTag = '—';
     if(l.tipo==='entrada'){ statusTag = l.recebido===false ? '<span class="tag imp">Pendente</span>' : '<span class="tag deleg">Recebido</span>'; }
     const acao = (l.tipo==='entrada' && l.recebido===false) ? `<button class="mini-btn" data-action="marcar-recebido" data-id="${l.id}">Marcar recebido</button>` : '';
-    tr.innerHTML = `<td>${l.data}</td><td>${escapeHtml(l.descricao)}</td><td>${escapeHtml(l.categoria||'—')}</td>
+    tr.innerHTML = `<td>${fmtData(l.data)}</td><td>${escapeHtml(l.descricao)}</td><td>${escapeHtml(l.categoria||'—')}</td>
       <td>${l.tipo==='entrada' ? '<span class="tag deleg">Entrada</span>' : '<span class="tag urg">Saída</span>'}</td>
       <td>${statusTag} ${acao}</td>
       <td class="mono">${fmtMoney(l.valor)}</td>`;
@@ -975,8 +1085,8 @@ function exportarBackup(){
 // ============================================================
 function bindStaticEvents(){
   $('btnLogin').addEventListener('click', doLogin);
-  $('btnSignup').addEventListener('click', doSignup);
   $('btnEsqueciSenha').addEventListener('click', doResetPassword);
+  $('btnCriarUsuarioEquipe').addEventListener('click', criarUsuarioEquipe);
   $('btnLogout').addEventListener('click', doLogout);
   $('btnTheme').addEventListener('click', toggleTheme);
   $('btnMenuToggle').addEventListener('click', ()=> $('sidebar').classList.toggle('open'));
@@ -988,6 +1098,11 @@ function bindStaticEvents(){
   $('btnFiltroAtivos').addEventListener('click', ()=> setFiltroEstoque('ativos'));
   $('btnFiltroInativos').addEventListener('click', ()=> setFiltroEstoque('inativos'));
   $('btnNovoCliente').addEventListener('click', ()=> openModal('modalCliente'));
+  $('btnNovoClientePDV').addEventListener('click', abrirNovoClienteDoPDV);
+  $('pdvDesconto').addEventListener('input', ()=>{
+    const v = Number($('pdvDesconto').value)||0;
+    $('pdvDescontoMotivo').style.display = v > 0 ? 'block' : 'none';
+  });
   $('btnSalvarCliente').addEventListener('click', salvarCliente);
   $('btnNovoLancamento').addEventListener('click', ()=> openModal('modalLancamento'));
   $('btnSalvarLancamento').addEventListener('click', salvarLancamento);
@@ -1062,7 +1177,8 @@ function bindStaticEvents(){
       'remover-carrinho': ()=> removerDoCarrinho(el.dataset.index),
       'agenda-dia': ()=> mostrarAgendaDia(el.dataset.date),
       'editar-venda': ()=> editarVenda(id),
-      'cancelar-venda': ()=> abrirModalCancelarVenda(id)
+      'cancelar-venda': ()=> abrirModalCancelarVenda(id),
+      'remover-equipe': ()=> removerAcessoEquipe(id)
     };
     if(actions[action]) actions[action]();
   });
