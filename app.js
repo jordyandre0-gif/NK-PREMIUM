@@ -1,11 +1,15 @@
 // ============================================================
-// NK PREMIUM — LÓGICA DO APP (v2)
+// NK PREMIUM — LÓGICA DO APP (v3)
 // ============================================================
 
 let currentUser = null;
 let UID = null;
 let produtos = [], clientes = [], vendas = [], lancamentos = [], itens = [];
 let selectedCaptureType = null;
+let carrinho = [];
+let agendaMonthOffset = 0;
+let crediarioDataEditadaManualmente = false;
+let ultimoRecibo = null;
 
 // -------------------- HELPERS --------------------
 function $(id){ return document.getElementById(id); }
@@ -20,16 +24,17 @@ function onlyDigits(s){ return (s||'').replace(/\D/g,''); }
 function waLink(phone, text){
   const digits = onlyDigits(phone);
   if(!digits) return null;
-  const full = digits.length <= 11 ? '55'+digits : digits; // assume Brasil se vier sem DDI
+  const full = digits.length <= 11 ? '55'+digits : digits;
   return 'https://wa.me/'+full+'?text='+encodeURIComponent(text);
 }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent = s==null?'':String(s); return d.innerHTML; }
 function toast(msg){
   const t = $('toast'); t.textContent = msg; t.style.display='block';
   clearTimeout(window._toastTimer);
-  window._toastTimer = setTimeout(()=> t.style.display='none', 3200);
+  window._toastTimer = setTimeout(()=> t.style.display='none', 3600);
 }
 function col(name){ return db.collection('users').doc(UID).collection(name); }
+function firestoreErr(e){ console.error(e); toast('Erro ao salvar: ' + (e && e.message ? e.message : e)); }
 
 // -------------------- THEME --------------------
 function toggleTheme(){
@@ -91,7 +96,7 @@ function openCapture(){
   openModal('modalCaptura');
 }
 
-// -------------------- STARTUP LISTENERS (Firestore) --------------------
+// -------------------- STARTUP LISTENERS --------------------
 function startListeners(){
   col('produtos').onSnapshot(snap=>{
     produtos = snap.docs.map(d=>({id:d.id, ...d.data()}));
@@ -111,7 +116,7 @@ function startListeners(){
   }, err => console.error('financeiro', err));
   col('itens').onSnapshot(snap=>{
     itens = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderTarefas(); renderDashboard();
+    renderTarefas(); renderDashboard(); renderAgenda();
   }, err => console.error('itens', err));
 }
 
@@ -123,24 +128,22 @@ function saveCapture(){
     texto: text, tipo: selectedCaptureType || null, data: $('captureDate').value || null,
     prioridade: null, concluido: false, prioridadeDoDia: false, createdAt: new Date().toISOString()
   };
-  col('itens').add(item).then(()=>{ closeModal('modalCaptura'); toast('Guardado!'); });
+  col('itens').add(item).then(()=>{ closeModal('modalCaptura'); toast('Guardado!'); }).catch(firestoreErr);
 }
-function classificarItem(id, tipo){ col('itens').doc(id).update({tipo}).then(()=> toast('Classificado.')); }
+function classificarItem(id, tipo){ col('itens').doc(id).update({tipo}).then(()=> toast('Classificado.')).catch(firestoreErr); }
 function concluirItem(id){
   const it = itens.find(i=>i.id===id);
   if(!it) return;
   const novo = !it.concluido;
-  col('itens').doc(id).update({concluido: novo});
-  if(it.lancamentoId){
-    col('financeiro').doc(it.lancamentoId).update({recebido: novo}).catch(()=>{});
-  }
+  col('itens').doc(id).update({concluido: novo}).catch(firestoreErr);
+  if(it.lancamentoId){ col('financeiro').doc(it.lancamentoId).update({recebido: novo}).catch(()=>{}); }
 }
 function marcarPrioridade(id){
   itens.forEach(it=>{ if(it.prioridadeDoDia) col('itens').doc(it.id).update({prioridadeDoDia:false}); });
-  col('itens').doc(id).update({prioridadeDoDia:true}).then(()=> toast('Definida como prioridade nº 1.'));
+  col('itens').doc(id).update({prioridadeDoDia:true}).then(()=> toast('Definida como prioridade nº 1.')).catch(firestoreErr);
 }
-function excluirItem(id){ if(confirm('Excluir este item?')) col('itens').doc(id).delete(); }
-function setPrazoRapido(id, dias){ col('itens').doc(id).update({data: addDays(todayStr(), dias)}); }
+function excluirItem(id){ if(confirm('Excluir este item?')) col('itens').doc(id).delete().catch(firestoreErr); }
+function setPrazoRapido(id, dias){ col('itens').doc(id).update({data: addDays(todayStr(), dias)}).catch(firestoreErr); }
 function cobrarItem(id){
   const it = itens.find(i=>i.id===id);
   if(!it) return;
@@ -203,6 +206,49 @@ function renderTaskGroup(elId, list, emptyMsg, mostrarCobrar){
   });
 }
 
+// -------------------- AGENDA (calendário) --------------------
+const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+function renderAgenda(){
+  if(!$('agendaGrid')) return;
+  const base = new Date(); base.setDate(1); base.setMonth(base.getMonth()+agendaMonthOffset);
+  const year = base.getFullYear(), month = base.getMonth();
+  $('agendaMesLabel').textContent = MESES[month] + ' de ' + year;
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const hoje = todayStr();
+
+  const contagem = {};
+  itens.filter(i=>i.tipo==='tarefa' && !i.concluido && i.data).forEach(i=>{ contagem[i.data] = (contagem[i.data]||0)+1; });
+
+  let html = '';
+  ['D','S','T','Q','Q','S','S'].forEach(d=> html += `<div style="text-align:center; color:var(--text-dim); font-weight:700; font-size:11px;">${d}</div>`);
+  for(let i=0;i<firstDay;i++) html += '<div></div>';
+  for(let day=1; day<=daysInMonth; day++){
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const count = contagem[dateStr]||0;
+    const isHoje = dateStr===hoje;
+    html += `<div class="calendar-day" data-action="agenda-dia" data-date="${dateStr}" style="${isHoje?'border:1px solid var(--gold);':''} ${count?'background:var(--surface-2);':''}">
+      <div>${day}</div>
+      ${count ? `<div style="width:5px; height:5px; border-radius:50%; background:var(--gold); margin:2px auto 0;"></div>` : ''}
+    </div>`;
+  }
+  $('agendaGrid').innerHTML = html;
+}
+function mudarMes(delta){ agendaMonthOffset += delta; renderAgenda(); }
+function mostrarAgendaDia(dateStr){
+  const doDia = itens.filter(i=> i.tipo==='tarefa' && i.data===dateStr);
+  const el = $('agendaSelecionado');
+  el.innerHTML = doDia.length ? '' : '<div class="empty">Nada nesse dia.</div>';
+  doDia.forEach(it=>{
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    let botoes = `<button class="mini-btn" data-action="concluir-item" data-id="${it.id}">${it.concluido?'✓ Concluída':'Marcar feita'}</button>`;
+    if(it.clienteWhats) botoes += `<button class="mini-btn btn-wa" data-action="cobrar-item" data-id="${it.id}">💬 Cobrar</button>`;
+    div.innerHTML = `<div class="title">${escapeHtml(it.texto)}</div>${botoes}`;
+    el.appendChild(div);
+  });
+}
+
 // -------------------- RENDER: DASHBOARD --------------------
 function renderDashboard(){
   const hoje = todayStr();
@@ -239,6 +285,8 @@ function renderDashboard(){
     focusEl.appendChild(div);
   });
 
+  renderRanking();
+
   let resumo = [];
   if(estoqueBaixo.length) resumo.push(`${estoqueBaixo.length} produto(s) com estoque baixo — considere repor.`);
   if(atrasadas.length) resumo.push(`${atrasadas.length} tarefa(s) atrasada(s) — vale reorganizar antes de assumir compromissos novos.`);
@@ -247,6 +295,28 @@ function renderDashboard(){
   if(totalHoje === 0) resumo.push('Ainda não há vendas registradas hoje.');
   else resumo.push(`Faturamento de hoje: ${fmtMoney(totalHoje)} em ${vendasHojeArr.length} venda(s).`);
   $('resumoExecutivo').innerHTML = resumo.map(r=>'• '+r).join('<br>');
+}
+
+function itensDaVenda(v){
+  if(v.itens && v.itens.length) return v.itens;
+  if(v.produtoNome) return [{produtoNome:v.produtoNome, quantidade:v.quantidade}];
+  return [];
+}
+function renderRanking(){
+  const mesAtual = todayStr().slice(0,7);
+  const contagem = {};
+  vendas.filter(v=> (v.createdAt||'').slice(0,7)===mesAtual).forEach(v=>{
+    itensDaVenda(v).forEach(i=>{ contagem[i.produtoNome] = (contagem[i.produtoNome]||0) + Number(i.quantidade||0); });
+  });
+  const arr = Object.entries(contagem).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const el = $('rankingProdutos');
+  el.innerHTML = arr.length ? '' : '<div class="empty">Sem vendas suficientes este mês.</div>';
+  arr.forEach(([nome, qtd], idx)=>{
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = `<div class="title">${idx+1}º — ${escapeHtml(nome)}</div><span class="mono">${qtd} un.</span>`;
+    el.appendChild(div);
+  });
 }
 
 // -------------------- ESTOQUE --------------------
@@ -263,7 +333,7 @@ function salvarProduto(){
     closeModal('modalProduto');
     ['prodNome','prodCusto','prodPreco'].forEach(id=> $(id).value='');
     toast('Produto salvo.');
-  });
+  }).catch(firestoreErr);
 }
 function renderEstoque(){
   const tbl = $('tblEstoque');
@@ -279,7 +349,7 @@ function renderEstoque(){
     tbl.appendChild(tr);
   });
 }
-function excluirProduto(id){ if(confirm('Excluir produto?')) col('produtos').doc(id).delete(); }
+function excluirProduto(id){ if(confirm('Excluir produto?')) col('produtos').doc(id).delete().catch(firestoreErr); }
 
 // -------------------- ESTOQUE EM LOTE --------------------
 function parseLoteLinha(linha){
@@ -290,8 +360,7 @@ function parseLoteLinha(linha){
   const estoque = parseInt(parts[2]||'0', 10);
   if(!nome || isNaN(preco) || isNaN(estoque)) return {erro: true, nome: nome || linha};
   return {
-    nome, preco, estoque,
-    categoria: parts[3] || 'Outro',
+    nome, preco, estoque, categoria: parts[3] || 'Outro',
     custo: parseFloat((parts[4]||'0').replace(',', '.')) || 0,
     minimo: parseInt(parts[5]||'2', 10) || 2
   };
@@ -315,7 +384,7 @@ function processarLote(){
     const box = $('loteResultado'); box.style.display='block'; box.textContent = resultado;
     $('loteTexto').value = '';
     toast('Lote processado.');
-  });
+  }).catch(firestoreErr);
 }
 function processarBaixa(){
   const linhas = $('baixaTexto').value.split('\n').map(l=>l.trim()).filter(Boolean);
@@ -337,7 +406,7 @@ function processarBaixa(){
     const box = $('baixaResultado'); box.style.display='block'; box.textContent = logs.join('\n');
     $('baixaTexto').value = '';
     toast('Baixa processada.');
-  });
+  }).catch(firestoreErr);
 }
 
 // -------------------- CATÁLOGO --------------------
@@ -360,17 +429,16 @@ function gerarCatalogo(){
   $('catalogoTexto').textContent = texto;
   openModal('modalCatalogo');
 }
-function copiarCatalogo(){
-  const texto = $('catalogoTexto').textContent;
+function copiarTexto(texto){
   if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(texto).then(()=> toast('Catálogo copiado!')).catch(()=> fallbackCopy(texto));
+    navigator.clipboard.writeText(texto).then(()=> toast('Copiado!')).catch(()=> fallbackCopy(texto));
   } else fallbackCopy(texto);
 }
 function fallbackCopy(texto){
   const ta = document.createElement('textarea');
   ta.value = texto; ta.style.position='fixed'; ta.style.opacity='0';
   document.body.appendChild(ta); ta.focus(); ta.select();
-  try{ document.execCommand('copy'); toast('Catálogo copiado!'); } catch(e){ toast('Não foi possível copiar automaticamente. Selecione o texto manualmente.'); }
+  try{ document.execCommand('copy'); toast('Copiado!'); } catch(e){ toast('Não foi possível copiar automaticamente. Selecione o texto manualmente.'); }
   document.body.removeChild(ta);
 }
 
@@ -386,9 +454,9 @@ function salvarCliente(){
     closeModal('modalCliente');
     ['cliNome','cliCpf','cliWhats','cliInsta','cliObs'].forEach(id=> $(id).value='');
     toast('Cliente salvo.');
-  });
+  }).catch(firestoreErr);
 }
-function excluirCliente(id){ if(confirm('Excluir cliente?')) col('clientes').doc(id).delete(); }
+function excluirCliente(id){ if(confirm('Excluir cliente?')) col('clientes').doc(id).delete().catch(firestoreErr); }
 function cobrarCliente(id){
   const c = clientes.find(x=>x.id===id);
   if(!c || !c.whatsapp){ toast('Esse cliente não tem WhatsApp cadastrado.'); return; }
@@ -412,63 +480,102 @@ function renderClientes(){
   });
 }
 
-// -------------------- PDV --------------------
+// -------------------- PDV (CARRINHO) --------------------
 function fillPdvSelects(){
   const selP = $('pdvProduto');
+  const atualP = selP.value;
   selP.innerHTML = produtos.map(p=> `<option value="${p.id}">${escapeHtml(p.nome)} — ${fmtMoney(p.preco)} (estoque: ${p.estoque})</option>`).join('') || '<option value="">— Cadastre um produto —</option>';
+  if(atualP) selP.value = atualP;
   const selC = $('pdvCliente');
-  const atual = selC.value;
-  selC.innerHTML = '<option value="">— Sem cliente —</option>' + clientes.map(c=> `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
-  selC.value = atual;
+  const atualC = selC.value;
+  selC.innerHTML = '<option value="">Cliente avulso</option>' + clientes.map(c=> `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
+  selC.value = atualC;
 }
-function toggleCrediarioBox(){
-  const show = $('pdvPagamento').value === 'Crediário';
-  $('crediarioBox').style.display = show ? 'block' : 'none';
-  if(show && !$('crediarioPrimeiraData').value){
-    $('crediarioPrimeiraData').value = addDays(todayStr(), Number($('crediarioIntervalo').value)||30);
-  }
-}
-function toggleIntervaloCustom(){
-  const custom = $('crediarioIntervalo').value === 'custom';
-  $('crediarioIntervaloCustom').style.display = custom ? 'block' : 'none';
-}
-function registrarVenda(){
+function adicionarAoCarrinho(){
   const prodId = $('pdvProduto').value;
   const prod = produtos.find(p=>p.id===prodId);
   if(!prod){ toast('Cadastre um produto primeiro.'); return; }
   const qtd = Number($('pdvQtd').value)||1;
+  const existente = carrinho.find(c=>c.produtoId===prodId);
+  if(existente){ existente.quantidade += qtd; }
+  else { carrinho.push({produtoId: prod.id, produtoNome: prod.nome, precoUnit: prod.preco, quantidade: qtd}); }
+  $('pdvQtd').value = 1;
+  renderCarrinho();
+}
+function removerDoCarrinho(index){ carrinho.splice(Number(index), 1); renderCarrinho(); }
+function renderCarrinho(){
+  const el = $('carrinhoLista');
+  el.innerHTML = carrinho.length ? '' : '<div class="empty">Carrinho vazio. Adicione produtos acima.</div>';
+  let total = 0;
+  carrinho.forEach((c, idx)=>{
+    const subtotal = c.precoUnit * c.quantidade;
+    total += subtotal;
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = `<div class="title">${c.quantidade}x ${escapeHtml(c.produtoNome)}</div>
+      <span class="mono">${fmtMoney(subtotal)}</span>
+      <button class="mini-btn" data-action="remover-carrinho" data-index="${idx}">✕</button>`;
+    el.appendChild(div);
+  });
+  $('carrinhoTotal').textContent = carrinho.length ? ('Total: ' + fmtMoney(total)) : '';
+}
+function toggleCrediarioBox(){
+  const show = $('pdvPagamento').value === 'Crediário';
+  $('crediarioBox').style.display = show ? 'block' : 'none';
+  if(show){ crediarioDataEditadaManualmente = false; atualizarSugestaoData(); }
+}
+function intervaloAtualDias(){
+  const v = $('crediarioIntervalo').value;
+  return v === 'custom' ? (Number($('crediarioIntervaloCustom').value)||30) : Number(v);
+}
+function toggleIntervaloCustom(){
+  const custom = $('crediarioIntervalo').value === 'custom';
+  $('crediarioIntervaloCustom').style.display = custom ? 'block' : 'none';
+  atualizarSugestaoData();
+}
+function atualizarSugestaoData(){
+  if(crediarioDataEditadaManualmente) return;
+  $('crediarioPrimeiraData').value = addDays(todayStr(), intervaloAtualDias());
+}
+function marcarDataManual(){ crediarioDataEditadaManualmente = true; }
+
+function registrarVenda(){
+  if(!carrinho.length){ toast('Adicione ao menos um produto ao carrinho.'); return; }
   const cliId = $('pdvCliente').value;
   const cli = clientes.find(c=>c.id===cliId);
+  const avulso = !cliId;
   const pagamento = $('pdvPagamento').value;
-  const total = prod.preco * qtd;
+  const total = carrinho.reduce((s,c)=> s + c.precoUnit*c.quantidade, 0);
 
-  if(pagamento === 'Crediário' && !cli){ toast('Selecione um cliente para venda parcelada.'); return; }
+  if(pagamento === 'Crediário' && !cli){ toast('Selecione um cliente cadastrado para venda parcelada (avulso não pode).'); return; }
 
+  const itensVenda = carrinho.map(c=> ({produtoId:c.produtoId, produtoNome:c.produtoNome, quantidade:c.quantidade, precoUnit:c.precoUnit, subtotal:c.precoUnit*c.quantidade}));
   const venda = {
-    produtoNome: prod.nome, produtoId: prod.id, quantidade: qtd,
-    clienteNome: cli ? cli.nome : null, clienteId: cliId || null,
-    pagamento, total, createdAt: new Date().toISOString()
+    itens: itensVenda, total, clienteId: cliId || null, clienteNome: cli ? cli.nome : 'Cliente avulso',
+    avulso, pagamento, createdAt: new Date().toISOString()
   };
-  col('vendas').add(venda);
-  col('produtos').doc(prod.id).update({ estoque: Math.max(0, Number(prod.estoque) - qtd) });
 
-  if(cli){ col('clientes').doc(cli.id).update({ totalGasto: Number(cli.totalGasto||0)+total, ultimaCompra: todayStr() }); }
+  col('vendas').add(venda).catch(firestoreErr);
+  carrinho.forEach(c=>{
+    const prod = produtos.find(p=>p.id===c.produtoId);
+    if(prod) col('produtos').doc(prod.id).update({ estoque: Math.max(0, Number(prod.estoque) - c.quantidade) }).catch(firestoreErr);
+  });
+  if(cli){ col('clientes').doc(cli.id).update({ totalGasto: Number(cli.totalGasto||0)+total, ultimaCompra: todayStr() }).catch(firestoreErr); }
+
+  const descItens = itensVenda.map(i=> i.quantidade+'x '+i.produtoNome).join(', ');
 
   if(pagamento !== 'Crediário'){
-    col('financeiro').add({ descricao: 'Venda: '+prod.nome+(cli?' — '+cli.nome:''), tipo:'entrada', valor: total, data: todayStr(), recebido:true, createdAt: new Date().toISOString() });
-    toast('Venda registrada: ' + fmtMoney(total));
+    col('financeiro').add({ descricao: 'Venda: '+descItens+(cli?' — '+cli.nome:' — avulso'), tipo:'entrada', valor: total, data: todayStr(), recebido:true, createdAt: new Date().toISOString() }).catch(firestoreErr);
   } else {
     const parcelas = Math.max(2, Number($('crediarioParcelas').value)||2);
-    let intervalo = $('crediarioIntervalo').value;
-    intervalo = intervalo === 'custom' ? (Number($('crediarioIntervaloCustom').value)||30) : Number(intervalo);
+    const intervalo = intervaloAtualDias();
     const primeiraData = $('crediarioPrimeiraData').value || addDays(todayStr(), intervalo);
     const valorBase = Math.round((total/parcelas) * 100) / 100;
-
     for(let i=0; i<parcelas; i++){
       const vencimento = addDays(primeiraData, intervalo*i);
       const valorParcela = (i === parcelas-1) ? Math.round((total - valorBase*(parcelas-1))*100)/100 : valorBase;
       col('financeiro').add({
-        descricao: `Parcela ${i+1}/${parcelas} — ${prod.nome} — ${cli.nome}`,
+        descricao: `Parcela ${i+1}/${parcelas} — ${descItens} — ${cli.nome}`,
         tipo:'entrada', valor: valorParcela, data: vencimento, recebido:false, createdAt: new Date().toISOString()
       }).then(ref=>{
         col('itens').add({
@@ -477,21 +584,48 @@ function registrarVenda(){
           origem:'crediario', lancamentoId: ref.id, clienteId: cli.id, clienteNome: cli.nome,
           clienteWhats: cli.whatsapp||null, valor: valorParcela, parcelaNum: i+1, parcelaTotal: parcelas,
           createdAt: new Date().toISOString()
-        });
-      });
+        }).catch(firestoreErr);
+      }).catch(firestoreErr);
     }
-    toast(`Venda parcelada em ${parcelas}x registrada.`);
   }
+
+  mostrarRecibo(venda);
+  carrinho = []; renderCarrinho();
+  $('pdvPagamento').value = 'Pix'; toggleCrediarioBox();
+  $('pdvCliente').value = '';
 }
+
+function mostrarRecibo(venda){
+  const linhas = venda.itens.map(i=> `${i.quantidade}x ${i.produtoNome} — ${fmtMoney(i.subtotal)}`).join('\n');
+  const texto = `🖤 NK Premium — Recibo\n\nCliente: ${venda.clienteNome}\n\n${linhas}\n\nTotal: ${fmtMoney(venda.total)}\nPagamento: ${venda.pagamento}${venda.pagamento==='Crediário'?' (parcelado)':''}\n\nObrigado pela preferência! 🖤`;
+  $('reciboTexto').textContent = texto;
+  const cli = clientes.find(c=>c.id===venda.clienteId);
+  const btnWa = $('btnEnviarRecibo');
+  if(cli && cli.whatsapp){
+    btnWa.style.display = 'block';
+    ultimoRecibo = {texto, whats: cli.whatsapp};
+  } else {
+    btnWa.style.display = 'none';
+    ultimoRecibo = {texto, whats: null};
+  }
+  openModal('modalRecibo');
+}
+function enviarRecibo(){
+  if(!ultimoRecibo || !ultimoRecibo.whats){ toast('Sem WhatsApp para enviar.'); return; }
+  const link = waLink(ultimoRecibo.whats, ultimoRecibo.texto);
+  if(link) window.open(link, '_blank');
+}
+
 function renderVendas(){
   const hoje = todayStr();
   const hojeList = vendas.filter(v=> (v.createdAt||'').slice(0,10)===hoje);
   const el = $('vendasHoje');
   el.innerHTML = hojeList.length ? '' : '<div class="empty">Nenhuma venda registrada hoje.</div>';
   hojeList.forEach(v=>{
+    const itensTxt = itensDaVenda(v).map(i=> i.quantidade+'x '+i.produtoNome).join(', ');
     const div = document.createElement('div');
     div.className = 'list-item';
-    div.innerHTML = `<div class="title">${escapeHtml(v.produtoNome)} x${v.quantidade} ${v.clienteNome ? '— '+escapeHtml(v.clienteNome):''} ${v.pagamento==='Crediário'?'<span class="tag imp">CREDIÁRIO</span>':''}</div>
+    div.innerHTML = `<div class="title">${escapeHtml(itensTxt)} ${v.avulso?'<span class="tag wait">AVULSO</span>':(v.clienteNome?'— '+escapeHtml(v.clienteNome):'')} ${v.pagamento==='Crediário'?'<span class="tag imp">CREDIÁRIO</span>':''}</div>
       <span class="mono">${fmtMoney(v.total)}</span>`;
     el.appendChild(div);
   });
@@ -508,10 +642,41 @@ function salvarLancamento(){
     closeModal('modalLancamento');
     ['finDesc','finValor'].forEach(id=> $(id).value='');
     toast('Lançamento salvo.');
-  });
+  }).catch(firestoreErr);
 }
 function marcarRecebido(id){
-  col('financeiro').doc(id).update({recebido: true}).then(()=> toast('Marcado como recebido.'));
+  col('financeiro').doc(id).update({recebido: true}).then(()=> toast('Marcado como recebido.')).catch(firestoreErr);
+}
+function parseLoteFinLinha(linha){
+  const parts = linha.split(';').map(s=>s.trim());
+  if(!parts[0]) return null;
+  const descricao = parts[0];
+  let tipo = (parts[1]||'saida').toLowerCase();
+  if(tipo !== 'entrada' && tipo !== 'saida') tipo = 'saida';
+  const valor = parseFloat((parts[2]||'').replace(',', '.'));
+  if(!descricao || isNaN(valor)) return {erro:true, nome:descricao||linha};
+  const data = parts[3] || todayStr();
+  return {descricao, tipo, valor, data};
+}
+function processarLoteFin(){
+  const linhas = $('loteFinTexto').value.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(!linhas.length){ toast('Cole ao menos uma linha.'); return; }
+  const validos = [], invalidos = [];
+  linhas.forEach(l=>{
+    const r = parseLoteFinLinha(l);
+    if(!r) return;
+    if(r.erro) invalidos.push(r.nome); else validos.push(r);
+  });
+  const promises = validos.map(l=> col('financeiro').add({
+    descricao:l.descricao, tipo:l.tipo, valor:l.valor, data:l.data, recebido:true, createdAt: new Date().toISOString()
+  }));
+  Promise.all(promises).then(()=>{
+    let resultado = `✅ ${validos.length} lançamento(s) registrado(s).`;
+    if(invalidos.length) resultado += `\n⚠️ ${invalidos.length} linha(s) ignorada(s): ${invalidos.join(', ')}`;
+    const box = $('loteFinResultado'); box.style.display='block'; box.textContent = resultado;
+    $('loteFinTexto').value = '';
+    toast('Lote lançado.');
+  }).catch(firestoreErr);
 }
 function renderFinanceiro(){
   const mesAtual = todayStr().slice(0,7);
@@ -530,9 +695,7 @@ function renderFinanceiro(){
   lancamentos.slice(0,80).forEach(l=>{
     const tr = document.createElement('tr');
     let statusTag = '—';
-    if(l.tipo==='entrada'){
-      statusTag = l.recebido===false ? '<span class="tag imp">Pendente</span>' : '<span class="tag deleg">Recebido</span>';
-    }
+    if(l.tipo==='entrada'){ statusTag = l.recebido===false ? '<span class="tag imp">Pendente</span>' : '<span class="tag deleg">Recebido</span>'; }
     const acao = (l.tipo==='entrada' && l.recebido===false) ? `<button class="mini-btn" data-action="marcar-recebido" data-id="${l.id}">Marcar recebido</button>` : '';
     tr.innerHTML = `<td>${l.data}</td><td>${escapeHtml(l.descricao)}</td>
       <td>${l.tipo==='entrada' ? '<span class="tag deleg">Entrada</span>' : '<span class="tag urg">Saída</span>'}</td>
@@ -542,8 +705,20 @@ function renderFinanceiro(){
   });
 }
 
+// -------------------- BACKUP --------------------
+function exportarBackup(){
+  const data = { exportadoEm: new Date().toISOString(), produtos, clientes, vendas, lancamentos, itens };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `nk-premium-backup-${todayStr()}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Backup baixado.');
+}
+
 // ============================================================
-// BINDING DE EVENTOS (delegação — corrige botões que não respondiam)
+// BINDING DE EVENTOS
 // ============================================================
 function bindStaticEvents(){
   $('btnLogin').addEventListener('click', doLogin);
@@ -560,15 +735,25 @@ function bindStaticEvents(){
   $('btnSalvarCliente').addEventListener('click', salvarCliente);
   $('btnNovoLancamento').addEventListener('click', ()=> openModal('modalLancamento'));
   $('btnSalvarLancamento').addEventListener('click', salvarLancamento);
+  $('btnLancamentoLote').addEventListener('click', ()=> openModal('modalLancamentoLote'));
+  $('btnProcessarLoteFin').addEventListener('click', processarLoteFin);
+  $('btnAddCarrinho').addEventListener('click', adicionarAoCarrinho);
   $('btnRegistrarVenda').addEventListener('click', registrarVenda);
   $('btnGerarCatalogo').addEventListener('click', gerarCatalogo);
-  $('btnCopiarCatalogo').addEventListener('click', copiarCatalogo);
+  $('btnCopiarCatalogo').addEventListener('click', ()=> copiarTexto($('catalogoTexto').textContent));
   $('btnListaLote').addEventListener('click', ()=> openModal('modalListaLote'));
   $('btnProcessarLote').addEventListener('click', processarLote);
   $('btnBaixaLista').addEventListener('click', ()=> openModal('modalBaixaLista'));
   $('btnProcessarBaixa').addEventListener('click', processarBaixa);
   $('pdvPagamento').addEventListener('change', toggleCrediarioBox);
   $('crediarioIntervalo').addEventListener('change', toggleIntervaloCustom);
+  $('crediarioIntervaloCustom').addEventListener('input', atualizarSugestaoData);
+  $('crediarioPrimeiraData').addEventListener('input', marcarDataManual);
+  $('btnCopiarRecibo').addEventListener('click', ()=> copiarTexto($('reciboTexto').textContent));
+  $('btnEnviarRecibo').addEventListener('click', enviarRecibo);
+  $('btnMesAnterior').addEventListener('click', ()=> mudarMes(-1));
+  $('btnMesProximo').addEventListener('click', ()=> mudarMes(1));
+  $('btnExportarBackup').addEventListener('click', exportarBackup);
 
   document.querySelectorAll('[data-close]').forEach(el=>{
     el.addEventListener('click', ()=> closeModal(el.dataset.close));
@@ -588,13 +773,13 @@ function bindStaticEvents(){
       el.classList.add('active');
       document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
       $('view-'+el.dataset.view).classList.add('active');
-      const titles = {dashboard:'Painel do Dia', estoque:'Estoque', pdv:'Vendas (PDV)', clientes:'Clientes', financeiro:'Financeiro', tarefas:'Tarefas & Inbox', config:'Configurações'};
+      const titles = {dashboard:'Painel do Dia', estoque:'Estoque', pdv:'Vendas (PDV)', clientes:'Clientes', financeiro:'Financeiro', agenda:'Agenda', tarefas:'Tarefas & Inbox', config:'Configurações'};
       $('pageTitle').textContent = titles[el.dataset.view];
       $('sidebar').classList.remove('open');
+      if(el.dataset.view === 'agenda') renderAgenda();
     });
   });
 
-  // Delegação global: cobre todo botão criado dinamicamente (tabelas e listas)
   document.body.addEventListener('click', function(e){
     const el = e.target.closest('[data-action]');
     if(!el) return;
@@ -610,7 +795,9 @@ function bindStaticEvents(){
       'excluir-produto': ()=> excluirProduto(id),
       'excluir-cliente': ()=> excluirCliente(id),
       'cobrar-cliente': ()=> cobrarCliente(id),
-      'marcar-recebido': ()=> marcarRecebido(id)
+      'marcar-recebido': ()=> marcarRecebido(id),
+      'remover-carrinho': ()=> removerDoCarrinho(el.dataset.index),
+      'agenda-dia': ()=> mostrarAgendaDia(el.dataset.date)
     };
     if(actions[action]) actions[action]();
   });
