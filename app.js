@@ -69,8 +69,11 @@ function doLogin(){
 function doLoginGoogle(){
   $('loginErr').textContent = '';
   const provider = new firebase.auth.GoogleAuthProvider();
-  auth.signInWithPopup(provider).catch(e => $('loginErr').textContent = traduzErro(e));
+  auth.signInWithRedirect(provider).catch(e => $('loginErr').textContent = traduzErro(e));
 }
+auth.getRedirectResult().catch(e=>{
+  if(e && e.code) $('loginErr').textContent = traduzErro(e);
+});
 function doSignup(){
   const email = $('loginEmail').value.trim();
   const pass = $('loginPass').value;
