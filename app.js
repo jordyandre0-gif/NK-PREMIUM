@@ -66,12 +66,20 @@ function doLogin(){
   $('loginErr').textContent = '';
   auth.signInWithEmailAndPassword(email, pass).catch(e => $('loginErr').textContent = traduzErro(e));
 }
+let jaProcessouLogin = false;
 function doLoginGoogle(){
   $('loginErr').textContent = '';
   const provider = new firebase.auth.GoogleAuthProvider();
-  auth.signInWithRedirect(provider).catch(e => $('loginErr').textContent = traduzErro(e));
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).then(()=>{
+    auth.signInWithRedirect(provider);
+  }).catch(e => $('loginErr').textContent = traduzErro(e));
 }
-auth.getRedirectResult().catch(e=>{
+auth.getRedirectResult().then(result=>{
+  if(result && result.user && !jaProcessouLogin){
+    jaProcessouLogin = true;
+    verificarAcessoEIniciar(result.user);
+  }
+}).catch(e=>{
   if(e && e.code) $('loginErr').textContent = traduzErro(e);
 });
 function doSignup(){
@@ -131,14 +139,18 @@ function verificarAcessoEIniciar(user){
     auth.signOut();
   });
 }
+let listenersIniciados = false;
 function finalizarLogin(user){
   currentUser = user; UID = user.uid;
   $('loginScreen').style.display = 'none';
   $('app').classList.add('show');
   $('userEmailShow').textContent = user.email + (isAdmin ? ' (administrador)' : '');
   aplicarPermissoesNaUI();
-  startListeners();
-  if(isAdmin) startUsuariosListener();
+  if(!listenersIniciados){
+    listenersIniciados = true;
+    startListeners();
+    if(isAdmin) startUsuariosListener();
+  }
 }
 
 auth.onAuthStateChanged(user => {
@@ -146,6 +158,7 @@ auth.onAuthStateChanged(user => {
     verificarAcessoEIniciar(user);
   } else {
     currentUser = null; UID = null; isAdmin = false; permissoesModulos = {};
+    listenersIniciados = false; jaProcessouLogin = false;
     $('loginScreen').style.display = 'flex';
     $('app').classList.remove('show');
   }
