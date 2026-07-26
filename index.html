@@ -37,7 +37,7 @@ button{font-family:inherit; cursor:pointer; border:none; border-radius:10px; fon
 .btn-primary:active{transform:scale(0.98);}
 .btn-ghost{background:transparent; color:var(--text-dim); border:1px solid var(--border); padding:10px 14px;}
 .btn-ghost:hover{color:var(--text); border-color:var(--gold);}
-.btn-wa{background:#25D366; color:#06210F; padding:8px 12px; font-size:12px;}
+.btn-wa{background:#25D366; color:#06210F; padding:10px 14px; font-size:13px;}
 .err{color:var(--danger); font-size:13px; min-height:16px;}
 
 #app{display:none; min-height:100vh; grid-template-columns:220px 1fr;}
@@ -113,6 +113,8 @@ td{padding:10px; border-bottom:1px solid var(--border);}
 .chip.selected{border-color:var(--gold); color:var(--gold); background:rgba(201,169,97,.1);}
 .hint{font-size:11px; color:var(--text-dim); margin-top:6px; line-height:1.5;}
 .pre-box{background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:12px; font-size:12px; white-space:pre-wrap; max-height:260px; overflow:auto; font-family:'IBM Plex Mono',monospace;}
+.calendar-day{text-align:center; padding:8px 2px; border-radius:8px; cursor:pointer; font-size:12px;}
+.calendar-day:active{background:var(--surface-2);}
 
 .toast{position:fixed; bottom:100px; right:26px; left:26px; max-width:340px; margin-left:auto; background:var(--surface-2); border:1px solid var(--gold); color:var(--text); padding:12px 18px; border-radius:10px; font-size:13px; z-index:80; display:none;}
 ::-webkit-scrollbar{width:8px; height:8px;}
@@ -141,6 +143,7 @@ td{padding:10px; border-bottom:1px solid var(--border);}
     <div class="nav-item" data-view="pdv"><span class="nav-icon">$</span> Vendas (PDV)</div>
     <div class="nav-item" data-view="clientes"><span class="nav-icon">☺</span> Clientes</div>
     <div class="nav-item" data-view="financeiro"><span class="nav-icon">%</span> Financeiro</div>
+    <div class="nav-item" data-view="agenda"><span class="nav-icon">📅</span> Agenda</div>
     <div class="nav-item" data-view="tarefas"><span class="nav-icon">✓</span> Tarefas & Inbox</div>
     <div class="nav-item" data-view="config"><span class="nav-icon">⚙</span> Configurações</div>
     <div class="side-footer">
@@ -171,6 +174,8 @@ td{padding:10px; border-bottom:1px solid var(--border);}
       </div>
       <div class="section-title">Foco de agora (máx. 3)</div>
       <div id="focusList"></div>
+      <div class="section-title">🏆 Mais vendidos (mês)</div>
+      <div id="rankingProdutos"><div class="empty">Sem vendas suficientes este mês.</div></div>
       <div class="section-title">Resumo executivo</div>
       <div class="card" id="resumoExecutivo" style="font-size:13px; color:var(--text-dim); line-height:1.6;">Sem dados suficientes ainda.</div>
     </section>
@@ -195,17 +200,24 @@ td{padding:10px; border-bottom:1px solid var(--border);}
       </div>
     </section>
 
-    <!-- PDV -->
+    <!-- PDV (carrinho) -->
     <section class="view" id="view-pdv">
       <div class="grid grid-2">
         <div class="card">
-          <h3 style="margin-bottom:12px; font-size:14px;">Nova venda</h3>
+          <h3 style="margin-bottom:12px; font-size:14px;">Montar venda</h3>
           <span class="field-label">Produto</span>
           <select id="pdvProduto"></select>
-          <span class="field-label">Cliente (opcional, obrigatório p/ crediário)</span>
-          <select id="pdvCliente"><option value="">— Sem cliente —</option></select>
           <span class="field-label">Quantidade</span>
           <input id="pdvQtd" type="number" value="1" min="1">
+          <button class="btn-ghost" style="width:100%; margin-top:10px;" id="btnAddCarrinho">+ Adicionar ao carrinho</button>
+
+          <div class="section-title" style="margin-top:20px;">Carrinho</div>
+          <div id="carrinhoLista"><div class="empty">Carrinho vazio. Adicione produtos acima.</div></div>
+          <div style="text-align:right; font-weight:700; margin-top:6px; font-size:16px;" id="carrinhoTotal"></div>
+
+          <span class="field-label" style="margin-top:18px;">Cliente</span>
+          <select id="pdvCliente"><option value="">Cliente avulso</option></select>
+
           <span class="field-label">Forma de pagamento</span>
           <select id="pdvPagamento">
             <option>Pix</option><option>Dinheiro</option><option>Cartão</option><option>Crediário</option>
@@ -224,10 +236,10 @@ td{padding:10px; border-bottom:1px solid var(--border);}
             <input id="crediarioIntervaloCustom" type="number" placeholder="Quantos dias?" style="display:none; margin-top:8px;">
             <span class="field-label">Data da 1ª parcela</span>
             <input id="crediarioPrimeiraData" type="date">
-            <div class="hint">Vai gerar uma tarefa de cobrança pra cada parcela, na data de vencimento.</div>
+            <div class="hint">A data sugerida já considera o intervalo escolhido a partir de hoje. Pode mudar — as próximas parcelas seguem a partir da data que você definir.</div>
           </div>
 
-          <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnRegistrarVenda">Registrar venda</button>
+          <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnRegistrarVenda">Finalizar venda</button>
         </div>
         <div class="card">
           <h3 style="margin-bottom:12px; font-size:14px;">Vendas de hoje</h3>
@@ -259,9 +271,12 @@ td{padding:10px; border-bottom:1px solid var(--border);}
         <div class="stat"><div class="label">Saldo (mês)</div><div class="value mono" id="finSaldo">R$ 0</div></div>
         <div class="stat"><div class="label">A receber (crediário)</div><div class="value mono" id="finAReceber">R$ 0</div></div>
       </div>
-      <div class="topbar" style="margin:18px 0 12px;">
+      <div class="topbar" style="margin:18px 0 12px; flex-wrap:wrap; gap:8px;">
         <div></div>
-        <button class="btn-primary" id="btnNovoLancamento">+ Novo lançamento</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn-ghost" id="btnLancamentoLote">📋 Lançar por lista</button>
+          <button class="btn-primary" id="btnNovoLancamento">+ Novo lançamento</button>
+        </div>
       </div>
       <div class="card">
         <table>
@@ -270,6 +285,20 @@ td{padding:10px; border-bottom:1px solid var(--border);}
         </table>
         <div class="empty" id="finEmpty">Nenhum lançamento ainda.</div>
       </div>
+    </section>
+
+    <!-- AGENDA -->
+    <section class="view" id="view-agenda">
+      <div class="card">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+          <button class="mini-btn" id="btnMesAnterior">‹ Anterior</button>
+          <div style="font-weight:700;" id="agendaMesLabel"></div>
+          <button class="mini-btn" id="btnMesProximo">Próximo ›</button>
+        </div>
+        <div id="agendaGrid" style="display:grid; grid-template-columns:repeat(7,1fr); gap:4px;"></div>
+      </div>
+      <div class="section-title">Itens do dia selecionado</div>
+      <div id="agendaSelecionado"><div class="empty">Toque num dia com marcação (•) pra ver os itens.</div></div>
     </section>
 
     <!-- TAREFAS -->
@@ -296,10 +325,13 @@ td{padding:10px; border-bottom:1px solid var(--border);}
         <h3 style="margin-bottom:10px; font-size:14px;">Sobre este painel</h3>
         <p style="font-size:13px; color:var(--text-dim); line-height:1.7;">
           Painel simplificado da NK Premium: uma prioridade por vez, captura rápida, e os módulos essenciais
-          (estoque, vendas, clientes, financeiro, tarefas), com crediário parcelado e cobrança por WhatsApp.
+          (estoque, vendas em carrinho, clientes, financeiro, agenda, tarefas), com crediário parcelado e
+          cobrança por WhatsApp.
         </p>
         <h3 style="margin:18px 0 10px; font-size:14px;">Conta</h3>
         <p style="font-size:13px; color:var(--text-dim);" id="userEmailShow"></p>
+        <h3 style="margin:18px 0 10px; font-size:14px;">Backup</h3>
+        <button class="btn-ghost" id="btnExportarBackup">⬇ Exportar backup (JSON)</button>
       </div>
     </section>
   </main>
@@ -343,7 +375,7 @@ td{padding:10px; border-bottom:1px solid var(--border);}
   <div class="modal">
     <span class="close-x" data-close="modalListaLote">✕</span>
     <h3>Cadastrar produtos por lista</h3>
-    <div class="hint">Uma linha por produto, separando os campos com ponto e vírgula:<br><b>Nome; Preço; Estoque; Categoria; Custo; Estoque mínimo</b><br>Só Nome, Preço e Estoque são obrigatórios. Exemplo:<br>Boné Aba Reta Preto; 89.90; 10<br>Perfume Árabe Ambar; 120; 5; Perfume Árabe; 60; 2</div>
+    <div class="hint">Uma linha por produto, separando os campos com ponto e vírgula:<br><b>Nome; Preço; Estoque; Categoria; Custo; Estoque mínimo</b><br>Só Nome, Preço e Estoque são obrigatórios.</div>
     <span class="field-label">Cole sua lista aqui</span>
     <textarea id="loteTexto" rows="7" placeholder="Nome; Preço; Estoque"></textarea>
     <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnProcessarLote">Cadastrar tudo</button>
@@ -355,7 +387,7 @@ td{padding:10px; border-bottom:1px solid var(--border);}
   <div class="modal">
     <span class="close-x" data-close="modalBaixaLista">✕</span>
     <h3>Baixar estoque por lista</h3>
-    <div class="hint">Uma linha por produto: <b>Nome; Quantidade a baixar</b><br>Combina pelo nome exato já cadastrado (sem diferenciar maiúsculas). Exemplo:<br>Boné Aba Reta Preto; 2<br>Cinto de Couro; 1</div>
+    <div class="hint">Uma linha por produto: <b>Nome; Quantidade a baixar</b></div>
     <span class="field-label">Cole sua lista aqui</span>
     <textarea id="baixaTexto" rows="6" placeholder="Nome; Quantidade"></textarea>
     <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnProcessarBaixa">Baixar do estoque</button>
@@ -395,6 +427,30 @@ td{padding:10px; border-bottom:1px solid var(--border);}
     <span class="field-label">Valor (R$)</span><input id="finValor" type="number" step="0.01">
     <span class="field-label">Data</span><input id="finData" type="date">
     <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnSalvarLancamento">Salvar lançamento</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="modalLancamentoLote">
+  <div class="modal">
+    <span class="close-x" data-close="modalLancamentoLote">✕</span>
+    <h3>Lançar por lista</h3>
+    <div class="hint">Uma linha por lançamento: <b>Descrição; Tipo (entrada/saida); Valor; Data (opcional, AAAA-MM-DD)</b><br>Se não informar a data, usa hoje.</div>
+    <span class="field-label">Cole sua lista aqui</span>
+    <textarea id="loteFinTexto" rows="8" placeholder="Compra Bermuda Mole (12un); saida; 342.00"></textarea>
+    <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnProcessarLoteFin">Lançar tudo</button>
+    <div class="pre-box" id="loteFinResultado" style="display:none; margin-top:10px;"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modalRecibo">
+  <div class="modal">
+    <span class="close-x" data-close="modalRecibo">✕</span>
+    <h3>Venda registrada ✅</h3>
+    <div class="pre-box" id="reciboTexto"></div>
+    <div class="row" style="margin-top:14px;">
+      <button class="btn-ghost" id="btnCopiarRecibo" style="flex:1;">Copiar</button>
+      <button class="btn-wa" id="btnEnviarRecibo" style="flex:1; display:none;">💬 Enviar no WhatsApp</button>
+    </div>
   </div>
 </div>
 
