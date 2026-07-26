@@ -4,10 +4,6 @@
 
 let currentUser = null;
 let UID = null;
-let isAdmin = false;
-let permissoesModulos = {};
-let usuariosAutorizados = [];
-let modulosSelecionados = [];
 let editandoProdutoId = null;
 let produtos = [], clientes = [], vendas = [], lancamentos = [], itens = [];
 let selectedCaptureType = null;
@@ -42,7 +38,7 @@ function toast(msg){
   clearTimeout(window._toastTimer);
   window._toastTimer = setTimeout(()=> t.style.display='none', 3600);
 }
-function col(name){ return db.collection('users').doc(WORKSPACE_ID).collection(name); }
+function col(name){ return db.collection('users').doc(UID).collection(name); }
 function firestoreErr(e){ console.error(e); toast('Erro ao salvar: ' + (e && e.message ? e.message : e)); }
 function produtosAtivos(){ return produtos.filter(p=> p.ativo !== false); }
 function ordenarPorNome(arr){ return [...arr].sort((a,b)=> (a.nome||'').localeCompare(b.nome||'', 'pt-BR')); }
@@ -66,22 +62,6 @@ function doLogin(){
   $('loginErr').textContent = '';
   auth.signInWithEmailAndPassword(email, pass).catch(e => $('loginErr').textContent = traduzErro(e));
 }
-let jaProcessouLogin = false;
-function doLoginGoogle(){
-  $('loginErr').textContent = '';
-  const provider = new firebase.auth.GoogleAuthProvider();
-  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).then(()=>{
-    auth.signInWithRedirect(provider);
-  }).catch(e => $('loginErr').textContent = traduzErro(e));
-}
-auth.getRedirectResult().then(result=>{
-  if(result && result.user && !jaProcessouLogin){
-    jaProcessouLogin = true;
-    verificarAcessoEIniciar(result.user);
-  }
-}).catch(e=>{
-  if(e && e.code) $('loginErr').textContent = traduzErro(e);
-});
 function doSignup(){
   const email = $('loginEmail').value.trim();
   const pass = $('loginPass').value;
@@ -106,142 +86,31 @@ function traduzErro(e){
   const map = {
     'auth/invalid-email':'E-mail inválido.', 'auth/user-not-found':'Usuário não encontrado.',
     'auth/wrong-password':'Senha incorreta.', 'auth/email-already-in-use':'Este e-mail já tem conta — tente entrar.',
-    'auth/weak-password':'Senha muito fraca (mín. 6 caracteres).', 'auth/invalid-credential':'E-mail ou senha incorretos.',
-    'auth/popup-closed-by-user':'Login cancelado.', 'auth/unauthorized-domain':'Este site ainda não está autorizado no Firebase (Authentication > Configurações > Domínios autorizados).'
+    'auth/weak-password':'Senha muito fraca (mín. 6 caracteres).', 'auth/invalid-credential':'E-mail ou senha incorretos.'
   };
   return map[e.code] || ('Erro: ' + e.message);
 }
 
-const MODULOS_TOGGLE = ['estoque','pdv','clientes','financeiro'];
-const MODULOS_SEMPRE_LIVRES = ['dashboard','agenda','tarefas'];
-
-function aplicarPermissoesNaUI(){
-  document.querySelectorAll('.nav-item').forEach(el=>{
-    const view = el.dataset.view;
-    let permitido = isAdmin || MODULOS_SEMPRE_LIVRES.includes(view) || permissoesModulos[view] === true;
-    if(view === 'config') permitido = isAdmin; // config/gestão de usuários é só do admin
-    el.style.display = permitido ? '' : 'none';
-  });
-  const painel = $('painelGestaoUsuarios');
-  if(painel) painel.style.display = isAdmin ? 'block' : 'none';
-  // se a view atual não é mais permitida, volta pro dashboard
-  const ativo = document.querySelector('.nav-item.active');
-  if(ativo && ativo.style.display === 'none'){
-    const dash = document.querySelector('.nav-item[data-view="dashboard"]');
-    if(dash) dash.click();
-  }
-}
-
-function verificarAcessoEIniciar(user){
-  try{
-    const emailLogado = (user.email||'').trim().toLowerCase();
-    const emailDono = (OWNER_EMAIL||'').trim().toLowerCase();
-    if(emailLogado === emailDono){
-      isAdmin = true; permissoesModulos = {};
-      finalizarLogin(user);
-      return;
-    }
-    db.collection('users').doc(WORKSPACE_ID).collection('usuarios').doc(emailLogado).get().then(doc=>{
-      try{
-        if(doc.exists && doc.data().ativo){
-          isAdmin = false;
-          permissoesModulos = doc.data().modulos || {};
-          finalizarLogin(user);
-        } else {
-          openModal('modalAcessoNegado');
-          auth.signOut();
-        }
-      } catch(erroInterno){
-        $('loginErr').textContent = 'Erro ao entrar (verificação de acesso): ' + erroInterno.message;
-        console.error(erroInterno);
-      }
-    }).catch(e=>{
-      console.error(e);
-      $('loginErr').textContent = 'Erro ao verificar seu acesso: ' + e.message;
-    });
-  } catch(erroExterno){
-    $('loginErr').textContent = 'Erro ao entrar: ' + erroExterno.message;
-    console.error(erroExterno);
-  }
-}
-let listenersIniciados = false;
-function finalizarLogin(user){
-  try{
-    currentUser = user; UID = user.uid;
-    $('loginScreen').style.display = 'none';
-    $('app').classList.add('show');
-    $('userEmailShow').textContent = user.email + (isAdmin ? ' (administrador)' : '');
-    aplicarPermissoesNaUI();
-    if(!listenersIniciados){
-      listenersIniciados = true;
-      startListeners();
-      if(isAdmin) startUsuariosListener();
-    }
-  } catch(erro){
-    $('loginScreen').style.display = 'flex';
-    $('app').classList.remove('show');
-    $('loginErr').textContent = 'Erro ao abrir o painel: ' + erro.message + ' (manda print disso)';
-    console.error(erro);
-  }
-}
-
 auth.onAuthStateChanged(user => {
   if(user){
-    verificarAcessoEIniciar(user);
+    try{
+      currentUser = user; UID = user.uid;
+      $('loginScreen').style.display = 'none';
+      $('app').classList.add('show');
+      $('userEmailShow').textContent = user.email;
+      startListeners();
+    } catch(erro){
+      $('loginScreen').style.display = 'flex';
+      $('app').classList.remove('show');
+      $('loginErr').textContent = 'Erro ao abrir o painel: ' + erro.message;
+      console.error(erro);
+    }
   } else {
-    currentUser = null; UID = null; isAdmin = false; permissoesModulos = {};
-    listenersIniciados = false; jaProcessouLogin = false;
+    currentUser = null; UID = null;
     $('loginScreen').style.display = 'flex';
     $('app').classList.remove('show');
   }
 });
-
-// -------------------- GESTÃO DE USUÁRIOS (admin) --------------------
-function startUsuariosListener(){
-  db.collection('users').doc(WORKSPACE_ID).collection('usuarios').onSnapshot(snap=>{
-    usuariosAutorizados = snap.docs.map(d=>({email:d.id, ...d.data()}));
-    renderUsuarios();
-  }, err=> console.error('usuarios', err));
-}
-function toggleModuloChip(chip){
-  chip.classList.toggle('selected');
-  const modulo = chip.dataset.modulo;
-  if(chip.classList.contains('selected')){ if(!modulosSelecionados.includes(modulo)) modulosSelecionados.push(modulo); }
-  else { modulosSelecionados = modulosSelecionados.filter(m=>m!==modulo); }
-}
-function salvarAcessoUsuario(){
-  const email = $('novoUsuarioEmail').value.trim().toLowerCase();
-  if(!email || !email.includes('@')){ toast('Informe um e-mail válido.'); return; }
-  if(email === OWNER_EMAIL){ toast('Esse já é o e-mail da conta principal.'); return; }
-  const modulos = {};
-  MODULOS_TOGGLE.forEach(m=> modulos[m] = modulosSelecionados.includes(m));
-  db.collection('users').doc(WORKSPACE_ID).collection('usuarios').doc(email).set({
-    email, nome: $('novoUsuarioNome').value.trim(), modulos, ativo:true, criadoEm: new Date().toISOString()
-  }).then(()=>{
-    toast('Acesso salvo para ' + email);
-    $('novoUsuarioEmail').value=''; $('novoUsuarioNome').value='';
-    modulosSelecionados = [];
-    document.querySelectorAll('#modulosChips .chip').forEach(c=>c.classList.remove('selected'));
-  }).catch(firestoreErr);
-}
-function removerAcessoUsuario(email){
-  if(!confirm(`Remover o acesso de ${email}? Ele(a) não vai conseguir mais entrar no painel.`)) return;
-  db.collection('users').doc(WORKSPACE_ID).collection('usuarios').doc(email).delete().then(()=> toast('Acesso removido.')).catch(firestoreErr);
-}
-function renderUsuarios(){
-  const el = $('listaUsuarios');
-  if(!el) return;
-  el.innerHTML = usuariosAutorizados.length ? '' : '<div class="empty">Nenhum usuário adicional autorizado ainda.</div>';
-  usuariosAutorizados.forEach(u=>{
-    const mods = MODULOS_TOGGLE.filter(m=> u.modulos && u.modulos[m]).map(m=>({estoque:'Estoque',pdv:'PDV',clientes:'Clientes',financeiro:'Financeiro'}[m]));
-    const div = document.createElement('div');
-    div.className = 'list-item';
-    div.innerHTML = `<div class="title">${escapeHtml(u.nome||u.email)} <span style="color:var(--text-dim); font-size:11px;">(${escapeHtml(u.email)})</span><br>
-      <span style="font-size:11px; color:var(--text-dim);">${mods.length? mods.join(', ') : 'Nenhum módulo liberado'}</span></div>
-      <button class="mini-btn" data-action="remover-usuario" data-email="${escapeHtml(u.email)}">Remover acesso</button>`;
-    el.appendChild(div);
-  });
-}
 
 // -------------------- MODAL HELPERS --------------------
 function openModal(id){ $(id).classList.add('show'); }
@@ -1106,10 +975,8 @@ function exportarBackup(){
 // ============================================================
 function bindStaticEvents(){
   $('btnLogin').addEventListener('click', doLogin);
-  $('btnLoginGoogle').addEventListener('click', doLoginGoogle);
   $('btnSignup').addEventListener('click', doSignup);
   $('btnEsqueciSenha').addEventListener('click', doResetPassword);
-  $('btnFecharAcessoNegado').addEventListener('click', ()=> closeModal('modalAcessoNegado'));
   $('btnLogout').addEventListener('click', doLogout);
   $('btnTheme').addEventListener('click', toggleTheme);
   $('btnMenuToggle').addEventListener('click', ()=> $('sidebar').classList.toggle('open'));
@@ -1118,10 +985,6 @@ function bindStaticEvents(){
   $('btnSalvarCaptura').addEventListener('click', saveCapture);
   $('btnNovoProduto').addEventListener('click', abrirModalNovoProduto);
   $('btnSalvarProduto').addEventListener('click', salvarProduto);
-  $('btnSalvarAcessoUsuario').addEventListener('click', salvarAcessoUsuario);
-  document.querySelectorAll('#modulosChips .chip').forEach(chip=>{
-    chip.addEventListener('click', ()=> toggleModuloChip(chip));
-  });
   $('btnFiltroAtivos').addEventListener('click', ()=> setFiltroEstoque('ativos'));
   $('btnFiltroInativos').addEventListener('click', ()=> setFiltroEstoque('inativos'));
   $('btnNovoCliente').addEventListener('click', ()=> openModal('modalCliente'));
@@ -1199,8 +1062,7 @@ function bindStaticEvents(){
       'remover-carrinho': ()=> removerDoCarrinho(el.dataset.index),
       'agenda-dia': ()=> mostrarAgendaDia(el.dataset.date),
       'editar-venda': ()=> editarVenda(id),
-      'cancelar-venda': ()=> abrirModalCancelarVenda(id),
-      'remover-usuario': ()=> removerAcessoUsuario(el.dataset.email)
+      'cancelar-venda': ()=> abrirModalCancelarVenda(id)
     };
     if(actions[action]) actions[action]();
   });
