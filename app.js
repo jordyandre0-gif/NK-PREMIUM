@@ -4,6 +4,11 @@
 
 let currentUser = null;
 let UID = null;
+let isAdmin = false;
+let permissoesModulos = {};
+let usuariosAutorizados = [];
+let modulosSelecionados = [];
+let editandoProdutoId = null;
 let produtos = [], clientes = [], vendas = [], lancamentos = [], itens = [];
 let selectedCaptureType = null;
 let carrinho = [];
@@ -37,7 +42,7 @@ function toast(msg){
   clearTimeout(window._toastTimer);
   window._toastTimer = setTimeout(()=> t.style.display='none', 3600);
 }
-function col(name){ return db.collection('users').doc(UID).collection(name); }
+function col(name){ return db.collection('users').doc(WORKSPACE_ID).collection(name); }
 function firestoreErr(e){ console.error(e); toast('Erro ao salvar: ' + (e && e.message ? e.message : e)); }
 function produtosAtivos(){ return produtos.filter(p=> p.ativo !== false); }
 function ordenarPorNome(arr){ return [...arr].sort((a,b)=> (a.nome||'').localeCompare(b.nome||'', 'pt-BR')); }
@@ -61,6 +66,11 @@ function doLogin(){
   $('loginErr').textContent = '';
   auth.signInWithEmailAndPassword(email, pass).catch(e => $('loginErr').textContent = traduzErro(e));
 }
+function doLoginGoogle(){
+  $('loginErr').textContent = '';
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(e => $('loginErr').textContent = traduzErro(e));
+}
 function doSignup(){
   const email = $('loginEmail').value.trim();
   const pass = $('loginPass').value;
@@ -73,24 +83,117 @@ function traduzErro(e){
   const map = {
     'auth/invalid-email':'E-mail inválido.', 'auth/user-not-found':'Usuário não encontrado.',
     'auth/wrong-password':'Senha incorreta.', 'auth/email-already-in-use':'Este e-mail já tem conta — tente entrar.',
-    'auth/weak-password':'Senha muito fraca (mín. 6 caracteres).', 'auth/invalid-credential':'E-mail ou senha incorretos.'
+    'auth/weak-password':'Senha muito fraca (mín. 6 caracteres).', 'auth/invalid-credential':'E-mail ou senha incorretos.',
+    'auth/popup-closed-by-user':'Login cancelado.', 'auth/unauthorized-domain':'Este site ainda não está autorizado no Firebase (Authentication > Configurações > Domínios autorizados).'
   };
   return map[e.code] || ('Erro: ' + e.message);
 }
 
+const MODULOS_TOGGLE = ['estoque','pdv','clientes','financeiro'];
+const MODULOS_SEMPRE_LIVRES = ['dashboard','agenda','tarefas'];
+
+function aplicarPermissoesNaUI(){
+  document.querySelectorAll('.nav-item').forEach(el=>{
+    const view = el.dataset.view;
+    let permitido = isAdmin || MODULOS_SEMPRE_LIVRES.includes(view) || permissoesModulos[view] === true;
+    if(view === 'config') permitido = isAdmin; // config/gestão de usuários é só do admin
+    el.style.display = permitido ? '' : 'none';
+  });
+  $('painelGestaoUsuarios').style.display = isAdmin ? 'block' : 'none';
+  // se a view atual não é mais permitida, volta pro dashboard
+  const ativo = document.querySelector('.nav-item.active');
+  if(ativo && ativo.style.display === 'none'){
+    document.querySelector('.nav-item[data-view="dashboard"]').click();
+  }
+}
+
+function verificarAcessoEIniciar(user){
+  if(user.email === OWNER_EMAIL){
+    isAdmin = true; permissoesModulos = {};
+    finalizarLogin(user);
+    return;
+  }
+  db.collection('users').doc(WORKSPACE_ID).collection('usuarios').doc(user.email).get().then(doc=>{
+    if(doc.exists && doc.data().ativo){
+      isAdmin = false;
+      permissoesModulos = doc.data().modulos || {};
+      finalizarLogin(user);
+    } else {
+      openModal('modalAcessoNegado');
+      auth.signOut();
+    }
+  }).catch(e=>{
+    console.error(e);
+    openModal('modalAcessoNegado');
+    auth.signOut();
+  });
+}
+function finalizarLogin(user){
+  currentUser = user; UID = user.uid;
+  $('loginScreen').style.display = 'none';
+  $('app').classList.add('show');
+  $('userEmailShow').textContent = user.email + (isAdmin ? ' (administrador)' : '');
+  aplicarPermissoesNaUI();
+  startListeners();
+  if(isAdmin) startUsuariosListener();
+}
+
 auth.onAuthStateChanged(user => {
   if(user){
-    currentUser = user; UID = user.uid;
-    $('loginScreen').style.display = 'none';
-    $('app').classList.add('show');
-    $('userEmailShow').textContent = user.email;
-    startListeners();
+    verificarAcessoEIniciar(user);
   } else {
-    currentUser = null; UID = null;
+    currentUser = null; UID = null; isAdmin = false; permissoesModulos = {};
     $('loginScreen').style.display = 'flex';
     $('app').classList.remove('show');
   }
 });
+
+// -------------------- GESTÃO DE USUÁRIOS (admin) --------------------
+function startUsuariosListener(){
+  db.collection('users').doc(WORKSPACE_ID).collection('usuarios').onSnapshot(snap=>{
+    usuariosAutorizados = snap.docs.map(d=>({email:d.id, ...d.data()}));
+    renderUsuarios();
+  }, err=> console.error('usuarios', err));
+}
+function toggleModuloChip(chip){
+  chip.classList.toggle('selected');
+  const modulo = chip.dataset.modulo;
+  if(chip.classList.contains('selected')){ if(!modulosSelecionados.includes(modulo)) modulosSelecionados.push(modulo); }
+  else { modulosSelecionados = modulosSelecionados.filter(m=>m!==modulo); }
+}
+function salvarAcessoUsuario(){
+  const email = $('novoUsuarioEmail').value.trim().toLowerCase();
+  if(!email || !email.includes('@')){ toast('Informe um e-mail válido.'); return; }
+  if(email === OWNER_EMAIL){ toast('Esse já é o e-mail da conta principal.'); return; }
+  const modulos = {};
+  MODULOS_TOGGLE.forEach(m=> modulos[m] = modulosSelecionados.includes(m));
+  db.collection('users').doc(WORKSPACE_ID).collection('usuarios').doc(email).set({
+    email, nome: $('novoUsuarioNome').value.trim(), modulos, ativo:true, criadoEm: new Date().toISOString()
+  }).then(()=>{
+    toast('Acesso salvo para ' + email);
+    $('novoUsuarioEmail').value=''; $('novoUsuarioNome').value='';
+    modulosSelecionados = [];
+    document.querySelectorAll('#modulosChips .chip').forEach(c=>c.classList.remove('selected'));
+  }).catch(firestoreErr);
+}
+function removerAcessoUsuario(email){
+  if(!confirm(`Remover o acesso de ${email}? Ele(a) não vai conseguir mais entrar no painel.`)) return;
+  db.collection('users').doc(WORKSPACE_ID).collection('usuarios').doc(email).delete().then(()=> toast('Acesso removido.')).catch(firestoreErr);
+}
+function renderUsuarios(){
+  const el = $('listaUsuarios');
+  if(!el) return;
+  el.innerHTML = usuariosAutorizados.length ? '' : '<div class="empty">Nenhum usuário adicional autorizado ainda.</div>';
+  usuariosAutorizados.forEach(u=>{
+    const mods = MODULOS_TOGGLE.filter(m=> u.modulos && u.modulos[m]).map(m=>({estoque:'Estoque',pdv:'PDV',clientes:'Clientes',financeiro:'Financeiro'}[m]));
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = `<div class="title">${escapeHtml(u.nome||u.email)} <span style="color:var(--text-dim); font-size:11px;">(${escapeHtml(u.email)})</span><br>
+      <span style="font-size:11px; color:var(--text-dim);">${mods.length? mods.join(', ') : 'Nenhum módulo liberado'}</span></div>
+      <button class="mini-btn" data-action="remover-usuario" data-email="${escapeHtml(u.email)}">Remover acesso</button>`;
+    el.appendChild(div);
+  });
+}
 
 // -------------------- MODAL HELPERS --------------------
 function openModal(id){ $(id).classList.add('show'); }
@@ -336,16 +439,43 @@ function registrarCompraEstoque(nome, custo, estoque){
     tipo:'saida', valor, data: todayStr(), recebido:true, createdAt: new Date().toISOString()
   }).catch(firestoreErr);
 }
+function abrirModalNovoProduto(){
+  editandoProdutoId = null;
+  ['prodNome','prodCusto','prodPreco'].forEach(id=> $(id).value='');
+  $('prodEstoque').value = 0; $('prodMinimo').value = 2; $('prodCategoria').value = 'Roupas';
+  document.querySelector('#modalProduto h3').textContent = 'Novo produto';
+  $('btnSalvarProduto').textContent = 'Salvar produto';
+  openModal('modalProduto');
+}
+function editarProduto(id){
+  const p = produtos.find(x=>x.id===id);
+  if(!p){ toast('Produto não encontrado.'); return; }
+  editandoProdutoId = id;
+  $('prodNome').value = p.nome; $('prodCategoria').value = p.categoria || 'Roupas';
+  $('prodCusto').value = p.custo || 0; $('prodPreco').value = p.preco || 0;
+  $('prodEstoque').value = p.estoque || 0; $('prodMinimo').value = p.minimo || 2;
+  document.querySelector('#modalProduto h3').textContent = 'Editar produto';
+  $('btnSalvarProduto').textContent = 'Salvar alterações';
+  openModal('modalProduto');
+}
 function salvarProduto(){
   const nome = $('prodNome').value.trim();
   if(!nome){ toast('Informe o nome do produto.'); return; }
+  const estoque = Number($('prodEstoque').value)||0;
   const p = {
     nome, categoria: $('prodCategoria').value,
     custo: Number($('prodCusto').value)||0, preco: Number($('prodPreco').value)||0,
-    estoque: Number($('prodEstoque').value)||0, minimo: Number($('prodMinimo').value)||0,
-    ativo: (Number($('prodEstoque').value)||0) > 0,
-    createdAt: new Date().toISOString()
+    estoque, minimo: Number($('prodMinimo').value)||0, ativo: estoque > 0
   };
+  if(editandoProdutoId){
+    col('produtos').doc(editandoProdutoId).update(p).then(()=>{
+      closeModal('modalProduto');
+      toast('Produto atualizado.');
+      editandoProdutoId = null;
+    }).catch(firestoreErr);
+    return;
+  }
+  p.createdAt = new Date().toISOString();
   col('produtos').add(p).then(()=>{
     closeModal('modalProduto');
     registrarCompraEstoque(p.nome, p.custo, p.estoque);
@@ -372,7 +502,7 @@ function renderEstoque(){
     tr.innerHTML = `<td>${escapeHtml(p.nome)}</td><td>${escapeHtml(p.categoria||'')}</td>
       <td class="mono">${fmtMoney(p.preco)}</td>
       <td class="mono">${p.estoque} ${baixo?'<span class="tag urg">BAIXO</span>':''} ${p.ativo===false?'<span class="tag wait">INATIVO</span>':''}</td>
-      <td style="white-space:nowrap;">${botaoExtra} <button class="mini-btn" data-action="excluir-produto" data-id="${p.id}">Excluir</button></td>`;
+      <td style="white-space:nowrap;">${botaoExtra} <button class="mini-btn" data-action="editar-produto" data-id="${p.id}">Editar</button> <button class="mini-btn" data-action="excluir-produto" data-id="${p.id}">Excluir</button></td>`;
     tbl.appendChild(tr);
   });
 }
@@ -928,15 +1058,21 @@ function exportarBackup(){
 // ============================================================
 function bindStaticEvents(){
   $('btnLogin').addEventListener('click', doLogin);
+  $('btnLoginGoogle').addEventListener('click', doLoginGoogle);
   $('btnSignup').addEventListener('click', doSignup);
+  $('btnFecharAcessoNegado').addEventListener('click', ()=> closeModal('modalAcessoNegado'));
   $('btnLogout').addEventListener('click', doLogout);
   $('btnTheme').addEventListener('click', toggleTheme);
   $('btnMenuToggle').addEventListener('click', ()=> $('sidebar').classList.toggle('open'));
   $('btnCapture').addEventListener('click', openCapture);
   $('fab').addEventListener('click', openCapture);
   $('btnSalvarCaptura').addEventListener('click', saveCapture);
-  $('btnNovoProduto').addEventListener('click', ()=> openModal('modalProduto'));
+  $('btnNovoProduto').addEventListener('click', abrirModalNovoProduto);
   $('btnSalvarProduto').addEventListener('click', salvarProduto);
+  $('btnSalvarAcessoUsuario').addEventListener('click', salvarAcessoUsuario);
+  document.querySelectorAll('#modulosChips .chip').forEach(chip=>{
+    chip.addEventListener('click', ()=> toggleModuloChip(chip));
+  });
   $('btnFiltroAtivos').addEventListener('click', ()=> setFiltroEstoque('ativos'));
   $('btnFiltroInativos').addEventListener('click', ()=> setFiltroEstoque('inativos'));
   $('btnNovoCliente').addEventListener('click', ()=> openModal('modalCliente'));
@@ -1006,6 +1142,7 @@ function bindStaticEvents(){
       'prazo-amanha': ()=> setPrazoRapido(id, 1),
       'cobrar-item': ()=> cobrarItem(id),
       'excluir-produto': ()=> excluirProduto(id),
+      'editar-produto': ()=> editarProduto(id),
       'reativar-produto': ()=> reativarProduto(id),
       'excluir-cliente': ()=> excluirCliente(id),
       'cobrar-cliente': ()=> cobrarCliente(id),
@@ -1013,7 +1150,8 @@ function bindStaticEvents(){
       'remover-carrinho': ()=> removerDoCarrinho(el.dataset.index),
       'agenda-dia': ()=> mostrarAgendaDia(el.dataset.date),
       'editar-venda': ()=> editarVenda(id),
-      'cancelar-venda': ()=> abrirModalCancelarVenda(id)
+      'cancelar-venda': ()=> abrirModalCancelarVenda(id),
+      'remover-usuario': ()=> removerAcessoUsuario(el.dataset.email)
     };
     if(actions[action]) actions[action]();
   });
