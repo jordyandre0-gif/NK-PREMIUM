@@ -131,12 +131,14 @@ function aplicarPermissoesNaUI(){
 }
 
 function verificarAcessoEIniciar(user){
-  if(user.email === OWNER_EMAIL){
+  const emailLogado = (user.email||'').trim().toLowerCase();
+  const emailDono = (OWNER_EMAIL||'').trim().toLowerCase();
+  if(emailLogado === emailDono){
     isAdmin = true; permissoesModulos = {};
     finalizarLogin(user);
     return;
   }
-  db.collection('users').doc(WORKSPACE_ID).collection('usuarios').doc(user.email).get().then(doc=>{
+  db.collection('users').doc(WORKSPACE_ID).collection('usuarios').doc(emailLogado).get().then(doc=>{
     if(doc.exists && doc.data().ativo){
       isAdmin = false;
       permissoesModulos = doc.data().modulos || {};
