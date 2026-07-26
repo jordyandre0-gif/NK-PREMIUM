@@ -7,88 +7,48 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 
-<!-- FIREBASE (compat SDK — simples de usar em arquivo único) -->
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 
 <style>
 :root{
-  --bg:#0A0A0B;
-  --surface:#141416;
-  --surface-2:#1C1C1F;
-  --border:#26262A;
-  --gold:#C9A961;
-  --gold-dim:#8A7440;
-  --text:#F5F4F2;
-  --text-dim:#9B9B9E;
-  --danger:#E5484D;
-  --warn:#E8A33D;
-  --ok:#4CAF7D;
-  --radius:14px;
+  --bg:#0A0A0B; --surface:#141416; --surface-2:#1C1C1F; --border:#26262A;
+  --gold:#C9A961; --gold-dim:#8A7440; --text:#F5F4F2; --text-dim:#9B9B9E;
+  --danger:#E5484D; --warn:#E8A33D; --ok:#4CAF7D; --radius:14px;
 }
 [data-theme="light"]{
-  --bg:#F7F6F3;
-  --surface:#FFFFFF;
-  --surface-2:#F0EFEC;
-  --border:#E4E2DD;
-  --gold:#A9822F;
-  --gold-dim:#C9A961;
-  --text:#171716;
-  --text-dim:#6B6A66;
+  --bg:#F7F6F3; --surface:#FFFFFF; --surface-2:#F0EFEC; --border:#E4E2DD;
+  --gold:#A9822F; --gold-dim:#C9A961; --text:#171716; --text-dim:#6B6A66;
 }
 *{box-sizing:border-box; margin:0; padding:0;}
-body{
-  font-family:'Inter',system-ui,sans-serif;
-  background:var(--bg);
-  color:var(--text);
-  min-height:100vh;
-  transition:background .25s ease, color .25s ease;
-}
+body{font-family:'Inter',system-ui,sans-serif; background:var(--bg); color:var(--text); min-height:100vh;}
 .mono{font-family:'IBM Plex Mono',monospace;}
 
-/* ---------- LOGIN ---------- */
-#loginScreen{
-  min-height:100vh; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:18px;
-  padding:24px;
-}
-.brand{ font-size:28px; font-weight:800; letter-spacing:-0.5px; }
+#loginScreen{min-height:100vh; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:18px; padding:24px;}
+.brand{font-size:28px; font-weight:800; letter-spacing:-0.5px;}
 .brand span{color:var(--gold);}
-.login-card{
-  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-  padding:32px; width:100%; max-width:380px; display:flex; flex-direction:column; gap:12px;
-}
+.login-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:32px; width:100%; max-width:380px; display:flex; flex-direction:column; gap:12px;}
 .login-card h2{font-size:16px; font-weight:600; margin-bottom:6px;}
-input, select, textarea{
-  background:var(--surface-2); border:1px solid var(--border); color:var(--text);
-  padding:12px 14px; border-radius:10px; font-size:14px; font-family:inherit; width:100%;
-}
+input, select, textarea{background:var(--surface-2); border:1px solid var(--border); color:var(--text); padding:12px 14px; border-radius:10px; font-size:14px; font-family:inherit; width:100%;}
 input:focus, select:focus, textarea:focus{outline:none; border-color:var(--gold);}
-button{
-  font-family:inherit; cursor:pointer; border:none; border-radius:10px; font-weight:600; font-size:14px;
-}
-.btn-primary{ background:var(--gold); color:#0A0A0B; padding:12px 16px; }
-.btn-primary:hover{background:#D9BC7A;}
-.btn-ghost{ background:transparent; color:var(--text-dim); border:1px solid var(--border); padding:10px 14px;}
+button{font-family:inherit; cursor:pointer; border:none; border-radius:10px; font-weight:600; font-size:14px; touch-action:manipulation;}
+.btn-primary{background:var(--gold); color:#0A0A0B; padding:12px 16px;}
+.btn-primary:active{transform:scale(0.98);}
+.btn-ghost{background:transparent; color:var(--text-dim); border:1px solid var(--border); padding:10px 14px;}
 .btn-ghost:hover{color:var(--text); border-color:var(--gold);}
+.btn-wa{background:#25D366; color:#06210F; padding:8px 12px; font-size:12px;}
 .err{color:var(--danger); font-size:13px; min-height:16px;}
 
-/* ---------- APP SHELL ---------- */
 #app{display:none; min-height:100vh; grid-template-columns:220px 1fr;}
 #app.show{display:grid;}
-@media (max-width:860px){ #app.show{grid-template-columns:1fr;} #sidebar{display:none;} #sidebar.open{display:flex; position:fixed; z-index:50; height:100vh;} }
+@media (max-width:860px){#app.show{grid-template-columns:1fr;} #sidebar{display:none;} #sidebar.open{display:flex; position:fixed; z-index:50; height:100vh;}}
 
-#sidebar{
-  background:var(--surface); border-right:1px solid var(--border);
-  display:flex; flex-direction:column; padding:22px 14px; gap:4px; width:220px;
-}
+#sidebar{background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:22px 14px; gap:4px; width:220px;}
 .side-brand{font-size:18px; font-weight:800; margin-bottom:22px; padding:0 8px;}
 .side-brand span{color:var(--gold);}
-.nav-item{
-  display:flex; align-items:center; gap:10px; padding:11px 12px; border-radius:10px;
-  color:var(--text-dim); font-size:14px; font-weight:500; cursor:pointer; transition:.15s;
-}
-.nav-item:hover{background:var(--surface-2); color:var(--text);}
+.nav-item{display:flex; align-items:center; gap:10px; padding:11px 12px; border-radius:10px; color:var(--text-dim); font-size:14px; font-weight:500; cursor:pointer;}
+.nav-item:active{background:var(--surface-2);}
 .nav-item.active{background:var(--surface-2); color:var(--gold); font-weight:600;}
 .nav-icon{width:18px; text-align:center;}
 .side-footer{margin-top:auto; display:flex; flex-direction:column; gap:8px;}
@@ -98,14 +58,12 @@ main{padding:26px 30px; max-width:1100px; width:100%; margin:0 auto;}
 .topbar h1{font-size:20px; font-weight:700;}
 .topbar .sub{color:var(--text-dim); font-size:13px; margin-top:2px;}
 .icon-btn{background:var(--surface); border:1px solid var(--border); width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; color:var(--text-dim); font-size:16px;}
-.icon-btn:hover{color:var(--gold); border-color:var(--gold);}
 .menu-toggle{display:none;}
 @media (max-width:860px){.menu-toggle{display:flex;}}
 
 .view{display:none;}
 .view.active{display:block;}
 
-/* ---------- CARDS ---------- */
 .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px;}
 .grid{display:grid; gap:14px;}
 .grid-2{grid-template-columns:1fr 1fr;}
@@ -113,11 +71,7 @@ main{padding:26px 30px; max-width:1100px; width:100%; margin:0 auto;}
 .grid-4{grid-template-columns:repeat(4,1fr);}
 @media (max-width:760px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr;}}
 
-.hero{
-  background:linear-gradient(135deg, var(--surface) 60%, var(--surface-2));
-  border:1px solid var(--gold-dim); border-left:4px solid var(--gold);
-  border-radius:var(--radius); padding:24px; margin-bottom:18px;
-}
+.hero{background:linear-gradient(135deg, var(--surface) 60%, var(--surface-2)); border:1px solid var(--gold-dim); border-left:4px solid var(--gold); border-radius:var(--radius); padding:24px; margin-bottom:18px;}
 .hero .eyebrow{color:var(--gold); font-size:12px; font-weight:700; letter-spacing:1px; text-transform:uppercase; margin-bottom:8px;}
 .hero h2{font-size:22px; font-weight:700; margin-bottom:6px; line-height:1.3;}
 .hero .meta{color:var(--text-dim); font-size:13px;}
@@ -125,77 +79,60 @@ main{padding:26px 30px; max-width:1100px; width:100%; margin:0 auto;}
 .stat{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px;}
 .stat .label{color:var(--text-dim); font-size:12px; margin-bottom:6px;}
 .stat .value{font-size:22px; font-weight:700;}
-.stat .value.mono{font-family:'IBM Plex Mono',monospace;}
 
-.section-title{font-size:14px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin:24px 0 10px;}
+.section-title{font-size:14px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin:24px 0 10px; display:flex; align-items:center; justify-content:space-between;}
 
-.list-item{
-  display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; margin-bottom:8px; background:var(--surface);
-}
+.list-item{display:flex; align-items:center; gap:10px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; margin-bottom:8px; background:var(--surface); flex-wrap:wrap;}
 .list-item .chk{width:20px; height:20px; border-radius:6px; border:2px solid var(--border); flex-shrink:0; cursor:pointer;}
-.list-item .chk.done{background:var(--ok); border-color:var(--ok);}
-.list-item .title{flex:1; font-size:14px;}
-.list-item.done .title{text-decoration:line-through; color:var(--text-dim);}
+.list-item .title{flex:1; font-size:14px; min-width:140px;}
 .tag{font-size:11px; padding:3px 8px; border-radius:20px; font-weight:600;}
 .tag.urg{background:rgba(229,72,77,.15); color:var(--danger);}
 .tag.imp{background:rgba(232,163,61,.15); color:var(--warn);}
 .tag.wait{background:rgba(155,155,158,.15); color:var(--text-dim);}
 .tag.deleg{background:rgba(76,175,125,.15); color:var(--ok);}
-.mini-btn{background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); padding:6px 10px; border-radius:8px; font-size:12px;}
-.mini-btn:hover{color:var(--text);}
+.mini-btn{background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); padding:6px 10px; border-radius:8px; font-size:12px; cursor:pointer;}
+.mini-btn:active{background:var(--border);}
 
 table{width:100%; border-collapse:collapse; font-size:13px;}
 th{text-align:left; color:var(--text-dim); font-weight:600; padding:8px 10px; border-bottom:1px solid var(--border); font-size:12px; text-transform:uppercase;}
 td{padding:10px; border-bottom:1px solid var(--border);}
-tr:hover td{background:var(--surface-2);}
 
 .empty{color:var(--text-dim); font-size:13px; text-align:center; padding:30px 10px;}
 
-/* Floating capture button */
-#fab{
-  position:fixed; bottom:26px; right:26px; width:58px; height:58px; border-radius:50%;
-  background:var(--gold); color:#0A0A0B; font-size:26px; display:flex; align-items:center; justify-content:center;
-  box-shadow:0 6px 24px rgba(0,0,0,.4); z-index:40;
-}
-#fab:hover{transform:scale(1.05);}
+#fab{position:fixed; bottom:26px; right:26px; width:58px; height:58px; border-radius:50%; background:var(--gold); color:#0A0A0B; font-size:26px; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 24px rgba(0,0,0,.4); z-index:40; border:none;}
 
-/* Modal */
-.modal-bg{display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:60; align-items:center; justify-content:center; padding:20px;}
+.modal-bg{display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:60; align-items:center; justify-content:center; padding:20px; overflow-y:auto;}
 .modal-bg.show{display:flex;}
-.modal{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; width:100%; max-width:440px; max-height:90vh; overflow:auto;}
+.modal{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; width:100%; max-width:460px; max-height:88vh; overflow:auto; margin:auto;}
 .modal h3{font-size:16px; font-weight:700; margin-bottom:14px;}
 .modal .row{display:flex; gap:8px; margin-top:10px;}
 .field-label{font-size:12px; color:var(--text-dim); margin:10px 0 4px; display:block;}
-.close-x{float:right; cursor:pointer; color:var(--text-dim); font-size:18px;}
+.close-x{float:right; cursor:pointer; color:var(--text-dim); font-size:18px; padding:4px;}
 .chip-row{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;}
 .chip{background:var(--surface-2); border:1px solid var(--border); padding:8px 12px; border-radius:20px; font-size:13px; color:var(--text-dim); cursor:pointer;}
 .chip.selected{border-color:var(--gold); color:var(--gold); background:rgba(201,169,97,.1);}
+.hint{font-size:11px; color:var(--text-dim); margin-top:6px; line-height:1.5;}
+.pre-box{background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:12px; font-size:12px; white-space:pre-wrap; max-height:260px; overflow:auto; font-family:'IBM Plex Mono',monospace;}
 
-.toast{position:fixed; bottom:100px; right:26px; background:var(--surface-2); border:1px solid var(--gold); color:var(--text); padding:12px 18px; border-radius:10px; font-size:13px; z-index:70; display:none;}
-
+.toast{position:fixed; bottom:100px; right:26px; left:26px; max-width:340px; margin-left:auto; background:var(--surface-2); border:1px solid var(--gold); color:var(--text); padding:12px 18px; border-radius:10px; font-size:13px; z-index:80; display:none;}
 ::-webkit-scrollbar{width:8px; height:8px;}
 ::-webkit-scrollbar-thumb{background:var(--border); border-radius:10px;}
 </style>
 </head>
 <body>
 
-<!-- ============ LOGIN ============ -->
 <div id="loginScreen">
   <div class="brand">NK <span>Premium</span></div>
   <div class="login-card">
     <h2>Entrar no painel</h2>
-    <input id="loginEmail" type="email" placeholder="E-mail">
-    <input id="loginPass" type="password" placeholder="Senha">
+    <input id="loginEmail" type="email" placeholder="E-mail" autocomplete="username">
+    <input id="loginPass" type="password" placeholder="Senha" autocomplete="current-password">
     <div class="err" id="loginErr"></div>
-    <button class="btn-primary" onclick="doLogin()">Entrar</button>
-    <button class="btn-ghost" onclick="doSignup()">Criar conta (primeiro acesso)</button>
-    <div style="font-size:11px; color:var(--text-dim); margin-top:8px; line-height:1.5;">
-      Antes de usar, configure o Firebase deste projeto no arquivo <b>firebase-init.js</b> (veja README).
-    </div>
+    <button class="btn-primary" id="btnLogin">Entrar</button>
+    <button class="btn-ghost" id="btnSignup">Criar conta (primeiro acesso)</button>
   </div>
 </div>
 
-<!-- ============ APP ============ -->
 <div id="app">
   <aside id="sidebar">
     <div class="side-brand">NK <span>Premium</span></div>
@@ -207,68 +144,65 @@ tr:hover td{background:var(--surface-2);}
     <div class="nav-item" data-view="tarefas"><span class="nav-icon">✓</span> Tarefas & Inbox</div>
     <div class="nav-item" data-view="config"><span class="nav-icon">⚙</span> Configurações</div>
     <div class="side-footer">
-      <button class="btn-ghost" onclick="toggleTheme()" id="themeBtn">🌙 Modo escuro</button>
-      <button class="btn-ghost" onclick="doLogout()">Sair</button>
+      <button class="btn-ghost" id="btnTheme">🌙 Modo escuro</button>
+      <button class="btn-ghost" id="btnLogout">Sair</button>
     </div>
   </aside>
 
   <main>
     <div class="topbar">
-      <button class="icon-btn menu-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
-      <div>
-        <h1 id="pageTitle">Painel do Dia</h1>
-        <div class="sub" id="pageDate"></div>
-      </div>
-      <button class="icon-btn" title="Capturar ideia rápida" onclick="openCapture()">+</button>
+      <button class="icon-btn menu-toggle" id="btnMenuToggle">☰</button>
+      <div><h1 id="pageTitle">Painel do Dia</h1><div class="sub" id="pageDate"></div></div>
+      <button class="icon-btn" id="btnCapture" title="Capturar ideia rápida">+</button>
     </div>
 
-    <!-- ---------- DASHBOARD ---------- -->
+    <!-- DASHBOARD -->
     <section class="view active" id="view-dashboard">
       <div class="hero">
         <div class="eyebrow">Prioridade nº 1 hoje</div>
         <h2 id="topPriorityText">Nenhuma prioridade definida ainda.</h2>
         <div class="meta" id="topPriorityMeta">Toque em "+" para capturar algo, ou defina uma prioridade em Tarefas.</div>
       </div>
-
       <div class="grid grid-4">
         <div class="stat"><div class="label">🔴 Atrasadas</div><div class="value mono" id="statAtrasadas">0</div></div>
         <div class="stat"><div class="label">🟡 Hoje</div><div class="value mono" id="statHoje">0</div></div>
         <div class="stat"><div class="label">📦 Estoque baixo</div><div class="value mono" id="statEstoqueBaixo">0</div></div>
         <div class="stat"><div class="label">💰 Faturado hoje</div><div class="value mono" id="statFaturado">R$ 0</div></div>
       </div>
-
       <div class="section-title">Foco de agora (máx. 3)</div>
       <div id="focusList"></div>
-
       <div class="section-title">Resumo executivo</div>
-      <div class="card" id="resumoExecutivo" style="font-size:13px; color:var(--text-dim); line-height:1.6;">
-        Sem dados suficientes ainda. Cadastre produtos, vendas e tarefas para o painel começar a pensar junto com você.
-      </div>
+      <div class="card" id="resumoExecutivo" style="font-size:13px; color:var(--text-dim); line-height:1.6;">Sem dados suficientes ainda.</div>
     </section>
 
-    <!-- ---------- ESTOQUE ---------- -->
+    <!-- ESTOQUE -->
     <section class="view" id="view-estoque">
-      <div class="topbar" style="margin-bottom:12px;">
+      <div class="topbar" style="margin-bottom:12px; flex-wrap:wrap; gap:8px;">
         <div></div>
-        <button class="btn-primary" onclick="openModal('modalProduto')">+ Novo produto</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn-ghost" id="btnGerarCatalogo">🗂 Gerar catálogo</button>
+          <button class="btn-ghost" id="btnBaixaLista">📉 Baixar por lista</button>
+          <button class="btn-ghost" id="btnListaLote">📋 Cadastrar por lista</button>
+          <button class="btn-primary" id="btnNovoProduto">+ Novo produto</button>
+        </div>
       </div>
       <div class="card">
         <table>
           <thead><tr><th>Produto</th><th>Categoria</th><th>Preço</th><th>Estoque</th><th></th></tr></thead>
           <tbody id="tblEstoque"></tbody>
         </table>
-        <div class="empty" id="estoqueEmpty">Nenhum produto cadastrado. Clique em "Novo produto".</div>
+        <div class="empty" id="estoqueEmpty">Nenhum produto cadastrado.</div>
       </div>
     </section>
 
-    <!-- ---------- PDV ---------- -->
+    <!-- PDV -->
     <section class="view" id="view-pdv">
       <div class="grid grid-2">
         <div class="card">
           <h3 style="margin-bottom:12px; font-size:14px;">Nova venda</h3>
           <span class="field-label">Produto</span>
           <select id="pdvProduto"></select>
-          <span class="field-label">Cliente (opcional)</span>
+          <span class="field-label">Cliente (opcional, obrigatório p/ crediário)</span>
           <select id="pdvCliente"><option value="">— Sem cliente —</option></select>
           <span class="field-label">Quantidade</span>
           <input id="pdvQtd" type="number" value="1" min="1">
@@ -276,7 +210,24 @@ tr:hover td{background:var(--surface-2);}
           <select id="pdvPagamento">
             <option>Pix</option><option>Dinheiro</option><option>Cartão</option><option>Crediário</option>
           </select>
-          <button class="btn-primary" style="margin-top:14px; width:100%;" onclick="registrarVenda()">Registrar venda</button>
+
+          <div id="crediarioBox" style="display:none; border:1px solid var(--gold-dim); border-radius:10px; padding:12px; margin-top:10px;">
+            <span class="field-label" style="margin-top:0;">Número de parcelas</span>
+            <input id="crediarioParcelas" type="number" value="2" min="2">
+            <span class="field-label">Intervalo entre parcelas</span>
+            <select id="crediarioIntervalo">
+              <option value="7">Semanal (7 dias)</option>
+              <option value="15">Quinzenal (15 dias)</option>
+              <option value="30" selected>Mensal (30 dias)</option>
+              <option value="custom">Personalizado (dias)</option>
+            </select>
+            <input id="crediarioIntervaloCustom" type="number" placeholder="Quantos dias?" style="display:none; margin-top:8px;">
+            <span class="field-label">Data da 1ª parcela</span>
+            <input id="crediarioPrimeiraData" type="date">
+            <div class="hint">Vai gerar uma tarefa de cobrança pra cada parcela, na data de vencimento.</div>
+          </div>
+
+          <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnRegistrarVenda">Registrar venda</button>
         </div>
         <div class="card">
           <h3 style="margin-bottom:12px; font-size:14px;">Vendas de hoje</h3>
@@ -285,45 +236,46 @@ tr:hover td{background:var(--surface-2);}
       </div>
     </section>
 
-    <!-- ---------- CLIENTES ---------- -->
+    <!-- CLIENTES -->
     <section class="view" id="view-clientes">
       <div class="topbar" style="margin-bottom:12px;">
         <div></div>
-        <button class="btn-primary" onclick="openModal('modalCliente')">+ Novo cliente</button>
+        <button class="btn-primary" id="btnNovoCliente">+ Novo cliente</button>
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>Nome</th><th>WhatsApp</th><th>Última compra</th><th>Total gasto</th></tr></thead>
+          <thead><tr><th>Nome</th><th>CPF</th><th>WhatsApp</th><th>Última compra</th><th>Total gasto</th><th></th></tr></thead>
           <tbody id="tblClientes"></tbody>
         </table>
         <div class="empty" id="clientesEmpty">Nenhum cliente cadastrado ainda.</div>
       </div>
     </section>
 
-    <!-- ---------- FINANCEIRO ---------- -->
+    <!-- FINANCEIRO -->
     <section class="view" id="view-financeiro">
-      <div class="grid grid-3">
-        <div class="stat"><div class="label">Entradas (mês)</div><div class="value mono" id="finEntradas">R$ 0</div></div>
+      <div class="grid grid-4">
+        <div class="stat"><div class="label">Recebido (mês)</div><div class="value mono" id="finEntradas">R$ 0</div></div>
         <div class="stat"><div class="label">Saídas (mês)</div><div class="value mono" id="finSaidas">R$ 0</div></div>
         <div class="stat"><div class="label">Saldo (mês)</div><div class="value mono" id="finSaldo">R$ 0</div></div>
+        <div class="stat"><div class="label">A receber (crediário)</div><div class="value mono" id="finAReceber">R$ 0</div></div>
       </div>
       <div class="topbar" style="margin:18px 0 12px;">
         <div></div>
-        <button class="btn-primary" onclick="openModal('modalLancamento')">+ Novo lançamento</button>
+        <button class="btn-primary" id="btnNovoLancamento">+ Novo lançamento</button>
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th>Valor</th></tr></thead>
+          <thead><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th>Status</th><th>Valor</th></tr></thead>
           <tbody id="tblFinanceiro"></tbody>
         </table>
         <div class="empty" id="finEmpty">Nenhum lançamento ainda.</div>
       </div>
     </section>
 
-    <!-- ---------- TAREFAS / INBOX ---------- -->
+    <!-- TAREFAS -->
     <section class="view" id="view-tarefas">
-      <div class="section-title">Caixa de entrada mental (não classificado)</div>
-      <div id="inboxList"><div class="empty">Sua caixa de entrada está vazia. Use o botão "+" para capturar qualquer ideia solta.</div></div>
+      <div class="section-title">Caixa de entrada mental</div>
+      <div id="inboxList"><div class="empty">Sua caixa de entrada está vazia.</div></div>
 
       <div class="section-title">🔴 Atrasadas</div>
       <div id="listAtrasadas"><div class="empty">Nada atrasado. 🎉</div></div>
@@ -338,30 +290,28 @@ tr:hover td{background:var(--surface-2);}
       <div id="listSemData"><div class="empty">Nada por aqui.</div></div>
     </section>
 
-    <!-- ---------- CONFIG ---------- -->
+    <!-- CONFIG -->
     <section class="view" id="view-config">
       <div class="card">
         <h3 style="margin-bottom:10px; font-size:14px;">Sobre este painel</h3>
         <p style="font-size:13px; color:var(--text-dim); line-height:1.7;">
-          Este é o painel simplificado da NK Premium, construído para reduzir carga mental: uma prioridade por vez,
-          captura rápida de ideias, e os módulos essenciais (estoque, vendas, clientes, financeiro, tarefas).
-          O sistema completo descrito no projeto original (100+ relatórios, IA consultiva, gamificação, app mobile
-          nativo, marketing automatizado) pode ser adicionado em fases futuras, sem sobrecarregar o uso diário agora.
+          Painel simplificado da NK Premium: uma prioridade por vez, captura rápida, e os módulos essenciais
+          (estoque, vendas, clientes, financeiro, tarefas), com crediário parcelado e cobrança por WhatsApp.
         </p>
-        <h3 style="margin:18px 0 10px; font-size:14px;">Dados da conta</h3>
+        <h3 style="margin:18px 0 10px; font-size:14px;">Conta</h3>
         <p style="font-size:13px; color:var(--text-dim);" id="userEmailShow"></p>
       </div>
     </section>
   </main>
 </div>
 
-<!-- ============ MODALS ============ -->
+<!-- MODAIS -->
 <div class="modal-bg" id="modalCaptura">
   <div class="modal">
-    <span class="close-x" onclick="closeModal('modalCaptura')">✕</span>
+    <span class="close-x" data-close="modalCaptura">✕</span>
     <h3>Captura rápida</h3>
     <span class="field-label">O que veio na sua cabeça?</span>
-    <textarea id="captureText" rows="3" placeholder="Ex: ligar pro fornecedor de perfume, ou ideia de campanha de dia dos namorados..."></textarea>
+    <textarea id="captureText" rows="3" placeholder="Ex: ligar pro fornecedor de perfume..."></textarea>
     <span class="field-label">Isto é:</span>
     <div class="chip-row" id="captureType">
       <div class="chip" data-t="tarefa">Tarefa</div>
@@ -372,48 +322,83 @@ tr:hover td{background:var(--surface-2);}
     </div>
     <span class="field-label">Quando (opcional)</span>
     <input type="date" id="captureDate">
-    <button class="btn-primary" style="margin-top:14px; width:100%;" onclick="saveCapture()">Guardar</button>
+    <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnSalvarCaptura">Guardar</button>
   </div>
 </div>
 
 <div class="modal-bg" id="modalProduto">
   <div class="modal">
-    <span class="close-x" onclick="closeModal('modalProduto')">✕</span>
+    <span class="close-x" data-close="modalProduto">✕</span>
     <h3>Novo produto</h3>
     <span class="field-label">Nome</span><input id="prodNome">
     <span class="field-label">Categoria</span>
     <select id="prodCategoria"><option>Roupas</option><option>Perfume Árabe</option><option>Perfume Importado</option><option>Acessórios</option><option>Boné</option><option>Carteira</option><option>Cinto</option><option>Relógio</option><option>Óculos</option><option>Outro</option></select>
     <div class="row"><div style="flex:1"><span class="field-label">Preço custo</span><input id="prodCusto" type="number" step="0.01"></div><div style="flex:1"><span class="field-label">Preço venda</span><input id="prodPreco" type="number" step="0.01"></div></div>
     <div class="row"><div style="flex:1"><span class="field-label">Estoque atual</span><input id="prodEstoque" type="number" value="0"></div><div style="flex:1"><span class="field-label">Estoque mínimo</span><input id="prodMinimo" type="number" value="2"></div></div>
-    <button class="btn-primary" style="margin-top:14px; width:100%;" onclick="salvarProduto()">Salvar produto</button>
+    <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnSalvarProduto">Salvar produto</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="modalListaLote">
+  <div class="modal">
+    <span class="close-x" data-close="modalListaLote">✕</span>
+    <h3>Cadastrar produtos por lista</h3>
+    <div class="hint">Uma linha por produto, separando os campos com ponto e vírgula:<br><b>Nome; Preço; Estoque; Categoria; Custo; Estoque mínimo</b><br>Só Nome, Preço e Estoque são obrigatórios. Exemplo:<br>Boné Aba Reta Preto; 89.90; 10<br>Perfume Árabe Ambar; 120; 5; Perfume Árabe; 60; 2</div>
+    <span class="field-label">Cole sua lista aqui</span>
+    <textarea id="loteTexto" rows="7" placeholder="Nome; Preço; Estoque"></textarea>
+    <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnProcessarLote">Cadastrar tudo</button>
+    <div class="pre-box" id="loteResultado" style="display:none; margin-top:10px;"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modalBaixaLista">
+  <div class="modal">
+    <span class="close-x" data-close="modalBaixaLista">✕</span>
+    <h3>Baixar estoque por lista</h3>
+    <div class="hint">Uma linha por produto: <b>Nome; Quantidade a baixar</b><br>Combina pelo nome exato já cadastrado (sem diferenciar maiúsculas). Exemplo:<br>Boné Aba Reta Preto; 2<br>Cinto de Couro; 1</div>
+    <span class="field-label">Cole sua lista aqui</span>
+    <textarea id="baixaTexto" rows="6" placeholder="Nome; Quantidade"></textarea>
+    <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnProcessarBaixa">Baixar do estoque</button>
+    <div class="pre-box" id="baixaResultado" style="display:none; margin-top:10px;"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modalCatalogo">
+  <div class="modal">
+    <span class="close-x" data-close="modalCatalogo">✕</span>
+    <h3>Catálogo (texto pronto pra WhatsApp/Instagram)</h3>
+    <div class="pre-box" id="catalogoTexto"></div>
+    <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnCopiarCatalogo">Copiar texto</button>
   </div>
 </div>
 
 <div class="modal-bg" id="modalCliente">
   <div class="modal">
-    <span class="close-x" onclick="closeModal('modalCliente')">✕</span>
+    <span class="close-x" data-close="modalCliente">✕</span>
     <h3>Novo cliente</h3>
     <span class="field-label">Nome</span><input id="cliNome">
-    <span class="field-label">WhatsApp</span><input id="cliWhats">
+    <span class="field-label">CPF</span><input id="cliCpf" placeholder="000.000.000-00">
+    <span class="field-label">WhatsApp (com DDD)</span><input id="cliWhats" placeholder="11999999999">
     <span class="field-label">Instagram</span><input id="cliInsta">
     <span class="field-label">Observações</span><textarea id="cliObs" rows="2"></textarea>
-    <button class="btn-primary" style="margin-top:14px; width:100%;" onclick="salvarCliente()">Salvar cliente</button>
+    <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnSalvarCliente">Salvar cliente</button>
   </div>
 </div>
 
 <div class="modal-bg" id="modalLancamento">
   <div class="modal">
-    <span class="close-x" onclick="closeModal('modalLancamento')">✕</span>
+    <span class="close-x" data-close="modalLancamento">✕</span>
     <h3>Novo lançamento financeiro</h3>
     <span class="field-label">Descrição</span><input id="finDesc">
     <span class="field-label">Tipo</span>
     <select id="finTipo"><option value="entrada">Entrada</option><option value="saida">Saída</option></select>
     <span class="field-label">Valor (R$)</span><input id="finValor" type="number" step="0.01">
     <span class="field-label">Data</span><input id="finData" type="date">
-    <button class="btn-primary" style="margin-top:14px; width:100%;" onclick="salvarLancamento()">Salvar lançamento</button>
+    <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnSalvarLancamento">Salvar lançamento</button>
   </div>
 </div>
 
+<button id="fab" title="Capturar ideia rápida">+</button>
 <div class="toast" id="toast"></div>
 
 <script src="firebase-init.js"></script>
