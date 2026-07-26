@@ -134,6 +134,13 @@ td{padding:10px; border-bottom:1px solid var(--border);}
 .toast{position:fixed; bottom:100px; right:26px; left:26px; max-width:340px; margin-left:auto; background:var(--surface-2); border:1px solid var(--gold); color:var(--text); padding:12px 18px; border-radius:10px; font-size:13px; z-index:80; display:none;}
 ::-webkit-scrollbar{width:8px; height:8px;}
 ::-webkit-scrollbar-thumb{background:var(--border); border-radius:10px;}
+@media print{
+  body *{ visibility:hidden; }
+  #relatorioConteudo, #relatorioConteudo *{ visibility:visible; }
+  #relatorioConteudo{ position:absolute; top:0; left:0; width:100%; }
+  .modal-bg{ position:static !important; background:none !important; padding:0 !important; }
+  #btnImprimirRelatorio, .close-x{ display:none !important; }
+}
 </style>
 </head>
 <body>
@@ -192,12 +199,15 @@ td{padding:10px; border-bottom:1px solid var(--border);}
       <div id="focusList"></div>
       <div class="section-title">🏆 Mais vendidos (mês)</div>
       <div id="rankingProdutos"><div class="empty">Sem vendas suficientes este mês.</div></div>
+      <div class="section-title">📊 Últimos 7 dias</div>
+      <div class="card"><div id="graficoVendas"></div></div>
       <div class="section-title">Resumo executivo</div>
       <div class="card" id="resumoExecutivo" style="font-size:13px; color:var(--text-dim); line-height:1.6;">Sem dados suficientes ainda.</div>
     </section>
 
     <!-- ESTOQUE -->
     <section class="view" id="view-estoque">
+      <input id="buscaEstoqueInput" placeholder="🔍 Buscar produto pelo nome..." style="margin-bottom:12px;">
       <div class="topbar" style="margin-bottom:12px; flex-wrap:wrap; gap:8px;">
         <div style="display:flex; gap:6px;">
           <button class="btn-ghost active-filter" id="btnFiltroAtivos">Ativos</button>
@@ -254,6 +264,25 @@ td{padding:10px; border-bottom:1px solid var(--border);}
             <option>Pix</option><option>Dinheiro</option><option>Cartão</option><option>Crediário</option>
           </select>
 
+          <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-size:13px; color:var(--text-dim);">
+            <input type="checkbox" id="pdvDividirPagamento" style="width:auto;"> Dividir pagamento (duas formas)
+          </label>
+          <div id="divisaoPagamentoBox" style="display:none; margin-top:8px;">
+            <div class="row">
+              <div style="flex:1">
+                <span class="field-label" style="margin-top:0;">Forma 1</span>
+                <select id="divPagamento1"><option>Pix</option><option>Dinheiro</option><option>Cartão</option></select>
+                <input id="divValor1" type="number" step="0.01" placeholder="Valor" style="margin-top:6px;">
+              </div>
+              <div style="flex:1">
+                <span class="field-label" style="margin-top:0;">Forma 2</span>
+                <select id="divPagamento2"><option>Dinheiro</option><option>Pix</option><option>Cartão</option></select>
+                <input id="divValor2" type="number" step="0.01" placeholder="Valor" style="margin-top:6px;" readonly>
+              </div>
+            </div>
+            <div class="hint">O valor da Forma 2 completa automaticamente o restante do total. Pagamento dividido não pode ser usado com crediário.</div>
+          </div>
+
           <div id="crediarioBox" style="display:none; border:1px solid var(--gold-dim); border-radius:10px; padding:12px; margin-top:10px;">
             <span class="field-label" style="margin-top:0;">Valor de entrada (opcional)</span>
             <input id="crediarioEntrada" type="number" step="0.01" value="0" min="0">
@@ -283,6 +312,7 @@ td{padding:10px; border-bottom:1px solid var(--border);}
 
     <!-- CLIENTES -->
     <section class="view" id="view-clientes">
+      <input id="buscaClientesInput" placeholder="🔍 Buscar cliente pelo nome..." style="margin-bottom:12px;">
       <div class="topbar" style="margin-bottom:12px;">
         <div></div>
         <button class="btn-primary" id="btnNovoCliente">+ Novo cliente</button>
@@ -311,6 +341,7 @@ td{padding:10px; border-bottom:1px solid var(--border);}
       <div class="topbar" style="margin:18px 0 12px; flex-wrap:wrap; gap:8px;">
         <div id="filtroFinanceiroLabel" style="font-size:13px; color:var(--text-dim);">Mostrando: todos os lançamentos</div>
         <div style="display:flex; gap:8px;">
+          <button class="btn-ghost" id="btnExportarRelatorio">🖨 Relatório do mês</button>
           <button class="btn-ghost" id="btnLancamentoLote">📋 Lançar por lista</button>
           <button class="btn-primary" id="btnNovoLancamento">+ Novo lançamento</button>
         </div>
@@ -519,6 +550,14 @@ td{padding:10px; border-bottom:1px solid var(--border);}
     <span class="field-label">Motivo (opcional)</span>
     <textarea id="motivoCancelamento" rows="2" placeholder="Ex: cliente desistiu, troca, engano no cadastro..."></textarea>
     <button class="btn-primary" style="margin-top:14px; width:100%; background:var(--danger); color:#fff;" id="btnConfirmarCancelamento">Confirmar cancelamento</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="modalRelatorio">
+  <div class="modal" style="max-width:600px;">
+    <span class="close-x" data-close="modalRelatorio">✕</span>
+    <div id="relatorioConteudo" style="color:#111; background:#fff; padding:16px; border-radius:8px;"></div>
+    <button class="btn-primary" style="margin-top:14px; width:100%;" id="btnImprimirRelatorio">🖨 Imprimir / Salvar PDF</button>
   </div>
 </div>
 
