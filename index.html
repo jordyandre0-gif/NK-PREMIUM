@@ -165,10 +165,15 @@ td{padding:10px; border-bottom:1px solid var(--border);}
   <div class="brand">NK <span>Premium</span></div>
   <div class="login-card">
     <h2>Entrar no painel</h2>
-    <input id="loginEmail" type="email" placeholder="E-mail" autocomplete="username">
-    <input id="loginPass" type="password" placeholder="Senha" autocomplete="current-password">
-    <div class="err" id="loginErr"></div>
-    <button class="btn-primary" id="btnLogin">Entrar</button>
+    <form id="loginForm" autocomplete="on">
+      <input id="loginEmail" name="email" type="email" placeholder="E-mail" autocomplete="username" required>
+      <input id="loginPass" name="password" type="password" placeholder="Senha" autocomplete="current-password" required style="margin-top:10px;">
+      <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-size:13px; color:var(--text-dim);">
+        <input type="checkbox" id="loginManterConectado" style="width:auto;" checked> Manter conectado neste aparelho
+      </label>
+      <div class="err" id="loginErr"></div>
+      <button class="btn-primary" type="submit" style="width:100%;">Entrar</button>
+    </form>
     <button class="btn-ghost" id="btnEsqueciSenha" style="font-size:12px;">Esqueci minha senha</button>
   </div>
 </div>
@@ -244,7 +249,13 @@ td{padding:10px; border-bottom:1px solid var(--border);}
       <div class="card">
         <div class="table-wrap">
         <table>
-          <thead><tr><th>Produto</th><th>Categoria</th><th>Preço</th><th>Estoque</th><th></th></tr></thead>
+          <thead><tr>
+            <th data-sort="nome" style="cursor:pointer; user-select:none;">Produto <span id="setaOrdNome"></span></th>
+            <th data-sort="categoria" style="cursor:pointer; user-select:none;">Categoria <span id="setaOrdCategoria"></span></th>
+            <th data-sort="preco" style="cursor:pointer; user-select:none;">Preço <span id="setaOrdPreco"></span></th>
+            <th data-sort="estoque" style="cursor:pointer; user-select:none;">Estoque <span id="setaOrdEstoque"></span></th>
+            <th></th>
+          </tr></thead>
           <tbody id="tblEstoque"></tbody>
         </table>
         </div>
