@@ -84,11 +84,16 @@ function toggleTheme(){
 })();
 
 // -------------------- AUTH --------------------
-function doLogin(){
+function doLogin(e){
+  if(e) e.preventDefault();
   const email = $('loginEmail').value.trim();
   const pass = $('loginPass').value;
   $('loginErr').textContent = '';
-  auth.signInWithEmailAndPassword(email, pass).catch(e => $('loginErr').textContent = traduzErro(e));
+  const manter = $('loginManterConectado').checked;
+  const persistencia = manter ? firebase.auth.Auth.Persistence.LOCAL : firebase.auth.Auth.Persistence.SESSION;
+  auth.setPersistence(persistencia).then(()=>{
+    return auth.signInWithEmailAndPassword(email, pass);
+  }).catch(e => $('loginErr').textContent = traduzErro(e));
 }
 function doLogout(){ auth.signOut(); }
 function doResetPassword(){
@@ -550,12 +555,43 @@ function setFiltroEstoque(f){
   $('btnFiltroInativos').classList.toggle('active-filter', f==='inativos');
   renderEstoque();
 }
+let ordenacaoEstoque = {campo:'nome', direcao:'asc'};
+function clicarOrdenarEstoque(campo){
+  const numerico = campo==='preco' || campo==='estoque';
+  if(ordenacaoEstoque.campo === campo){
+    ordenacaoEstoque.direcao = ordenacaoEstoque.direcao==='asc' ? 'desc' : 'asc';
+  } else {
+    ordenacaoEstoque.campo = campo;
+    // padrão: números começam do maior pro menor, letras em ordem alfabética (A→Z)
+    ordenacaoEstoque.direcao = numerico ? 'desc' : 'asc';
+  }
+  renderEstoque();
+}
+function ordenarListaEstoque(lista){
+  const {campo, direcao} = ordenacaoEstoque;
+  const mult = direcao==='asc' ? 1 : -1;
+  const numerico = campo==='preco' || campo==='estoque';
+  return [...lista].sort((a,b)=>{
+    if(numerico){ return ((Number(a[campo])||0) - (Number(b[campo])||0)) * mult; }
+    return String(a[campo]||'').localeCompare(String(b[campo]||''), 'pt-BR') * mult;
+  });
+}
+function atualizarSetasOrdenacao(){
+  ['nome','categoria','preco','estoque'].forEach(campo=>{
+    const map = {nome:'setaOrdNome', categoria:'setaOrdCategoria', preco:'setaOrdPreco', estoque:'setaOrdEstoque'};
+    const el = $(map[campo]);
+    if(!el) return;
+    el.textContent = ordenacaoEstoque.campo===campo ? (ordenacaoEstoque.direcao==='asc' ? '▲' : '▼') : '';
+  });
+}
 function renderEstoque(){
   const tbl = $('tblEstoque');
   tbl.innerHTML = '';
   const busca = ($('buscaEstoqueInput').value||'').trim().toLowerCase();
-  let filtrados = ordenarPorNome(produtos.filter(p=> filtroEstoque==='ativos' ? p.ativo!==false : p.ativo===false));
+  let filtrados = produtos.filter(p=> filtroEstoque==='ativos' ? p.ativo!==false : p.ativo===false);
   if(busca) filtrados = filtrados.filter(p=> p.nome.toLowerCase().includes(busca));
+  filtrados = ordenarListaEstoque(filtrados);
+  atualizarSetasOrdenacao();
   $('estoqueEmpty').style.display = filtrados.length ? 'none' : 'block';
   $('estoqueEmpty').textContent = busca ? 'Nenhum produto encontrado com esse nome.' : (filtroEstoque==='ativos' ? 'Nenhum produto ativo cadastrado.' : 'Nenhum produto inativo (sem estoque zerado).');
   filtrados.forEach(p=>{
@@ -1416,7 +1452,10 @@ function exportarBackup(){
 // BINDING DE EVENTOS
 // ============================================================
 function bindStaticEvents(){
-  $('btnLogin').addEventListener('click', doLogin);
+  $('loginForm').addEventListener('submit', doLogin);
+  document.querySelectorAll('th[data-sort]').forEach(th=>{
+    th.addEventListener('click', ()=> clicarOrdenarEstoque(th.dataset.sort));
+  });
   $('btnEsqueciSenha').addEventListener('click', doResetPassword);
   $('btnCriarUsuarioEquipe').addEventListener('click', criarUsuarioEquipe);
   $('btnLogout').addEventListener('click', doLogout);
